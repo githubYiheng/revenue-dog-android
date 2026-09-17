@@ -1,0 +1,19 @@
+{
+  "method": "GET",
+  "path": "\/v1\/subscribers\/%24RDAnonymousID%3A0123456789abcdef0123456789abcdef",
+  "headers": {
+    "Accept": "application\/json",
+    "Authorization": "<redacted>",
+    "Content-Type": "application\/json",
+    "X-Billing-Client-Sdk-Version": "9.1.0",
+    "X-Is-Backgrounded": "true",
+    "X-Is-Debug-Build": "false",
+    "X-Is-Sandbox": "false",
+    "X-Observer-Mode-Enabled": "false",
+    "X-Platform": "android",
+    "X-Platform-Flavor": "native",
+    "X-RevenueDog-ETag": "",
+    "X-Version": "0.1.0"
+  },
+  "body": null
+}

@@ -1,0 +1,68 @@
+[versions]
+# Android SDK 版本（设计 §0 基线：minSdk 24 / compileSdk 36）
+android-compileSdk = "36"
+android-minSdk = "24"
+android-targetSdk = "36"
+
+# 工具链。RC 10.22.1 停在 AGP 8.13.2 / Kotlin 2.0.21；我方取当前稳定版
+# （AGP 9.4.0 要求 Gradle ≥ 9.6、JDK ≥ 17，本机 JDK 21 + Gradle 9.7.1）。
+agp = "9.4.0"
+kotlin = "2.4.20"
+# 对宿主的最低 Kotlin 要求（对照 RC `kotlinLanguage = 1.8`）
+kotlinLanguage = "2.0"
+
+# Play Billing Library。ADR 0069 决策 3：基线 9.1.0（RC 仍在 8.3.0）。
+billingClient = "9.1.0"
+
+androidxAnnotation = "1.10.0"
+# androidx.core / lifecycle 被 compileSdk 36 钉住：1.19.0 / 2.11.0 起要求 compileSdk 37。
+# 升它们要连 compileSdk 一起升，属于单独一批（lint 的 GradleDependency 提示因此是预期内的）。
+androidxCore = "1.16.0"
+lifecycle = "2.9.4"
+coroutines = "1.11.0"
+
+detekt = "1.23.8"
+poko = "0.23.1"
+metalava = "0.5.1"
+
+# 测试
+junit = "4.13.2"
+assertJ = "3.27.7"
+# Robolectric 4.17 在本机 JDK 21 上起不来（"Failed to interact with raw FileDescriptor internals"），
+# 钉在 4.16.1。升级它属于单独一批，要连 JDK 一起验。
+robolectric = "4.16.1"
+# MockK：BillingClient 是 final 类，只能靠它的 inline mock（RC 单测同款做法）。
+mockk = "1.13.13"
+json = "20260814"
+androidxTestCore = "1.7.0"
+androidxTestJunit = "1.3.0"
+
+[libraries]
+billing = { module = "com.android.billingclient:billing-ktx", version.ref = "billingClient" }
+androidx-annotation = { module = "androidx.annotation:annotation", version.ref = "androidxAnnotation" }
+androidx-core = { module = "androidx.core:core-ktx", version.ref = "androidxCore" }
+androidx-lifecycle-process = { module = "androidx.lifecycle:lifecycle-process", version.ref = "lifecycle" }
+androidx-lifecycle-common = { module = "androidx.lifecycle:lifecycle-common", version.ref = "lifecycle" }
+coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
+coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
+
+detekt-api = { module = "io.gitlab.arturbosch.detekt:detekt-api", version.ref = "detekt" }
+detekt-test = { module = "io.gitlab.arturbosch.detekt:detekt-test", version.ref = "detekt" }
+
+junit = { module = "junit:junit", version.ref = "junit" }
+assertJ = { module = "org.assertj:assertj-core", version.ref = "assertJ" }
+robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
+mockk = { module = "io.mockk:mockk", version.ref = "mockk" }
+coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
+# Android 在单测里把 org.json 打成 stub，塞一个真实实现进来（对照 RC purchases/build.gradle.kts:222）
+json = { module = "org.json:json", version.ref = "json" }
+androidx-test-core = { module = "androidx.test:core-ktx", version.ref = "androidxTestCore" }
+androidx-test-junit = { module = "androidx.test.ext:junit-ktx", version.ref = "androidxTestJunit" }
+
+[plugins]
+android-library = { id = "com.android.library", version.ref = "agp" }
+kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+detekt = { id = "io.gitlab.arturbosch.detekt", version.ref = "detekt" }
+poko = { id = "dev.drewhamilton.poko", version.ref = "poko" }
+metalava = { id = "me.tylerbwong.gradle.metalava", version.ref = "metalava" }

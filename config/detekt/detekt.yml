@@ -1,0 +1,25 @@
+# RevenueDog detekt 配置。`buildUponDefaultConfig = true`，这里只写偏离项。
+#
+# 纪律（照抄 RC AGENTS.md 的 guardrail）：**绝不扩大 baseline**。
+# 要么改代码，要么在**最小范围**上 `@Suppress("RuleName")` 并写清理由。
+# 只有升级 detekt 或新增规则才配得上动 baseline。
+
+naming:
+  TopLevelPropertyNaming:
+    active: true
+    constantPattern: '[A-Z][_A-Za-z0-9]*'
+
+# `formatting`（ktlint）规则集需要 detekt-formatting 插件。M1 不引：
+# 它会一次性刷出几百条格式项，淹掉真正有意义的发现。M4 硬化时单独一批接入。
+
+complexity:
+  LongParameterList:
+    # 值类型的构造参数就是它的字段，拆开只会更难读（RC 同款豁免）。
+    ignoreAnnotated: [ 'Poko' ]
+
+# 自定义规则集：禁 public enum（后端加枚举值不能摔老 SDK）。
+revenuedog:
+  active: true
+  ForbiddenPublicEnum:
+    active: true
+    ignoreAnnotated: [ 'InternalRevenueDogAPI' ]

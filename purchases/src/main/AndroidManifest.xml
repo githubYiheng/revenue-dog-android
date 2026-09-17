@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="com.android.vending.BILLING" />
+
+    <!--
+      故意**不**声明 com.google.android.gms.permission.AD_ID（对照 RC 把
+      play-services-ads-identifier 钉在 17.0.1 的做法）：Play Console 的
+      Data Safety 表单会因为这个权限多出一整块广告标识披露。
+    -->
+</manifest>

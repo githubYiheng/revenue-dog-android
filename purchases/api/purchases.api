@@ -1,0 +1,766 @@
+// Signature format: 4.0
+package org.revdog.purchases {
+
+  @dev.drewhamilton.poko.Poko public final class CacheFetchPolicy {
+    method @InaccessibleFromKotlin public static org.revdog.purchases.CacheFetchPolicy getDefault();
+    method @InaccessibleFromKotlin public String getRawValue();
+    property public String rawValue;
+    field public static final org.revdog.purchases.CacheFetchPolicy CACHED_OR_FETCHED;
+    field public static final org.revdog.purchases.CacheFetchPolicy CACHE_ONLY;
+    field public static final org.revdog.purchases.CacheFetchPolicy.Companion Companion;
+    field public static final org.revdog.purchases.CacheFetchPolicy FETCH_CURRENT;
+    field public static final org.revdog.purchases.CacheFetchPolicy NOT_STALE_CACHED_OR_CURRENT;
+  }
+
+  public static final class CacheFetchPolicy.Companion {
+    method @KotlinOnly public org.revdog.purchases.CacheFetchPolicy default();
+    method @InaccessibleFromKotlin public org.revdog.purchases.CacheFetchPolicy getDefault();
+    property public org.revdog.purchases.CacheFetchPolicy CACHED_OR_FETCHED;
+    property public org.revdog.purchases.CacheFetchPolicy CACHE_ONLY;
+    property public org.revdog.purchases.CacheFetchPolicy FETCH_CURRENT;
+    property public org.revdog.purchases.CacheFetchPolicy NOT_STALE_CACHED_OR_CURRENT;
+  }
+
+  public final class CoroutinesExtensions {
+    method @KotlinOnly @kotlin.jvm.JvmSynthetic public static suspend Object? awaitCustomerInfo(org.revdog.purchases.Purchases, optional org.revdog.purchases.CacheFetchPolicy fetchPolicy, kotlin.coroutines.Continuation<? super org.revdog.purchases.customerinfo.CustomerInfo>);
+    method @KotlinOnly @kotlin.jvm.JvmSynthetic public static suspend Object? awaitLogIn(org.revdog.purchases.Purchases, String appUserID, kotlin.coroutines.Continuation<? super org.revdog.purchases.LogInResult>);
+    method @KotlinOnly @kotlin.jvm.JvmSynthetic public static suspend Object? awaitLogOut(org.revdog.purchases.Purchases, kotlin.coroutines.Continuation<? super org.revdog.purchases.customerinfo.CustomerInfo>);
+    method @KotlinOnly @kotlin.jvm.JvmSynthetic public static suspend Object? awaitOfferings(org.revdog.purchases.Purchases, kotlin.coroutines.Continuation<? super org.revdog.purchases.offerings.Offerings>);
+  }
+
+  @kotlin.RequiresOptIn(level=kotlin.RequiresOptIn.Level.ERROR, message="This API is internal to RevenueDog and may change or be removed without a major version bump.") @kotlin.annotation.Retention(kotlin.annotation.AnnotationRetention.BINARY) @kotlin.annotation.Target(allowedTargets={kotlin.annotation.AnnotationTarget.CLASS, kotlin.annotation.AnnotationTarget.FUNCTION, kotlin.annotation.AnnotationTarget.PROPERTY, kotlin.annotation.AnnotationTarget.CONSTRUCTOR, kotlin.annotation.AnnotationTarget.PROPERTY_GETTER, kotlin.annotation.AnnotationTarget.PROPERTY_SETTER}) public @interface InternalRevenueDogAPI {
+  }
+
+  public final class ListenerConversions {
+    method @KotlinOnly @kotlin.jvm.JvmSynthetic public static void getCustomerInfoWith(org.revdog.purchases.Purchases, optional org.revdog.purchases.CacheFetchPolicy fetchPolicy, optional kotlin.jvm.functions.Function1<org.revdog.purchases.PurchasesError,kotlin.Unit> onError, kotlin.jvm.functions.Function1<org.revdog.purchases.customerinfo.CustomerInfo,kotlin.Unit> onSuccess);
+    method @KotlinOnly @kotlin.jvm.JvmSynthetic public static void getOfferingsWith(org.revdog.purchases.Purchases, optional kotlin.jvm.functions.Function1<org.revdog.purchases.PurchasesError,kotlin.Unit> onError, kotlin.jvm.functions.Function1<org.revdog.purchases.offerings.Offerings,kotlin.Unit> onSuccess);
+    method @KotlinOnly @kotlin.jvm.JvmSynthetic public static void logInWith(org.revdog.purchases.Purchases, String appUserID, optional kotlin.jvm.functions.Function1<org.revdog.purchases.PurchasesError,kotlin.Unit> onError, kotlin.jvm.functions.Function2<org.revdog.purchases.customerinfo.CustomerInfo,java.lang.Boolean,kotlin.Unit> onSuccess);
+    method @KotlinOnly @kotlin.jvm.JvmSynthetic public static void logOutWith(org.revdog.purchases.Purchases, optional kotlin.jvm.functions.Function1<org.revdog.purchases.PurchasesError,kotlin.Unit> onError, kotlin.jvm.functions.Function1<org.revdog.purchases.customerinfo.CustomerInfo,kotlin.Unit> onSuccess);
+  }
+
+  public interface LogHandler {
+    method public void log(org.revdog.purchases.LogLevel level, String message, Throwable? throwable);
+  }
+
+  public interface LogInCallback {
+    method public void onError(org.revdog.purchases.PurchasesError error);
+    method public void onReceived(org.revdog.purchases.customerinfo.CustomerInfo customerInfo, boolean created);
+  }
+
+  public final class LogInResult {
+    method @InaccessibleFromKotlin public boolean getCreated();
+    method @InaccessibleFromKotlin public org.revdog.purchases.customerinfo.CustomerInfo getCustomerInfo();
+    property public boolean created;
+    property public org.revdog.purchases.customerinfo.CustomerInfo customerInfo;
+  }
+
+  @dev.drewhamilton.poko.Poko public final class LogLevel implements java.lang.Comparable<org.revdog.purchases.LogLevel> {
+    method public int compareTo(org.revdog.purchases.LogLevel other);
+    method @InaccessibleFromKotlin public String getName();
+    method @InaccessibleFromKotlin public int getSeverity();
+    property public String name;
+    property public int severity;
+    field public static final java.util.List<org.revdog.purchases.LogLevel> ALL;
+    field public static final org.revdog.purchases.LogLevel.Companion Companion;
+    field public static final org.revdog.purchases.LogLevel DEBUG;
+    field public static final org.revdog.purchases.LogLevel ERROR;
+    field public static final org.revdog.purchases.LogLevel INFO;
+    field public static final org.revdog.purchases.LogLevel VERBOSE;
+    field public static final org.revdog.purchases.LogLevel WARN;
+  }
+
+  public static final class LogLevel.Companion {
+    property public java.util.List<org.revdog.purchases.LogLevel> ALL;
+    property public org.revdog.purchases.LogLevel DEBUG;
+    property public org.revdog.purchases.LogLevel ERROR;
+    property public org.revdog.purchases.LogLevel INFO;
+    property public org.revdog.purchases.LogLevel VERBOSE;
+    property public org.revdog.purchases.LogLevel WARN;
+  }
+
+  @dev.drewhamilton.poko.Poko public final class OwnershipType {
+    method public static org.revdog.purchases.OwnershipType fromString(String? value);
+    method @InaccessibleFromKotlin public String getRawValue();
+    property public String rawValue;
+    field public static final java.util.List<org.revdog.purchases.OwnershipType> ALL;
+    field public static final org.revdog.purchases.OwnershipType.Companion Companion;
+    field public static final org.revdog.purchases.OwnershipType FAMILY_SHARED;
+    field public static final org.revdog.purchases.OwnershipType PURCHASED;
+    field public static final org.revdog.purchases.OwnershipType UNKNOWN;
+  }
+
+  public static final class OwnershipType.Companion {
+    method public org.revdog.purchases.OwnershipType fromString(String? value);
+    property public java.util.List<org.revdog.purchases.OwnershipType> ALL;
+    property public org.revdog.purchases.OwnershipType FAMILY_SHARED;
+    property public org.revdog.purchases.OwnershipType PURCHASED;
+    property public org.revdog.purchases.OwnershipType UNKNOWN;
+  }
+
+  @dev.drewhamilton.poko.Poko public final class PeriodType {
+    method public static org.revdog.purchases.PeriodType fromString(String? value);
+    method @InaccessibleFromKotlin public String getRawValue();
+    property public String rawValue;
+    field public static final java.util.List<org.revdog.purchases.PeriodType> ALL;
+    field public static final org.revdog.purchases.PeriodType.Companion Companion;
+    field public static final org.revdog.purchases.PeriodType INTRO;
+    field public static final org.revdog.purchases.PeriodType NORMAL;
+    field public static final org.revdog.purchases.PeriodType PREPAID;
+    field public static final org.revdog.purchases.PeriodType TRIAL;
+  }
+
+  public static final class PeriodType.Companion {
+    method public org.revdog.purchases.PeriodType fromString(String? value);
+    property public java.util.List<org.revdog.purchases.PeriodType> ALL;
+    property public org.revdog.purchases.PeriodType INTRO;
+    property public org.revdog.purchases.PeriodType NORMAL;
+    property public org.revdog.purchases.PeriodType PREPAID;
+    property public org.revdog.purchases.PeriodType TRIAL;
+  }
+
+  @dev.drewhamilton.poko.Poko public final class ProductType {
+    method public static org.revdog.purchases.ProductType fromString(String? value);
+    method @InaccessibleFromKotlin public String getRawValue();
+    property public String rawValue;
+    field public static final java.util.List<org.revdog.purchases.ProductType> ALL;
+    field public static final org.revdog.purchases.ProductType.Companion Companion;
+    field public static final org.revdog.purchases.ProductType INAPP;
+    field public static final org.revdog.purchases.ProductType SUBS;
+    field public static final org.revdog.purchases.ProductType UNKNOWN;
+  }
+
+  public static final class ProductType.Companion {
+    method public org.revdog.purchases.ProductType fromString(String? value);
+    property public java.util.List<org.revdog.purchases.ProductType> ALL;
+    property public org.revdog.purchases.ProductType INAPP;
+    property public org.revdog.purchases.ProductType SUBS;
+    property public org.revdog.purchases.ProductType UNKNOWN;
+  }
+
+  public final class Purchases {
+    method public static org.revdog.purchases.Purchases configure(org.revdog.purchases.PurchasesConfiguration configuration);
+    method @InaccessibleFromKotlin public String getAppUserID();
+    method @InaccessibleFromKotlin public org.revdog.purchases.customerinfo.CustomerInfo? getCachedCustomerInfo();
+    method @InaccessibleFromKotlin public org.revdog.purchases.offerings.Offerings? getCachedOfferings();
+    method public void getCustomerInfo(org.revdog.purchases.CacheFetchPolicy fetchPolicy, org.revdog.purchases.ReceiveCustomerInfoCallback callback);
+    method public void getCustomerInfo(org.revdog.purchases.ReceiveCustomerInfoCallback callback);
+    method @InaccessibleFromKotlin public kotlinx.coroutines.flow.Flow<org.revdog.purchases.customerinfo.CustomerInfo> getCustomerInfoFlow();
+    method @InaccessibleFromKotlin public static org.revdog.purchases.LogHandler getLogHandler();
+    method @InaccessibleFromKotlin public static org.revdog.purchases.LogLevel getLogLevel();
+    method public void getOfferings(org.revdog.purchases.ReceiveOfferingsCallback callback);
+    method @InaccessibleFromKotlin public static org.revdog.purchases.Purchases getSharedInstance();
+    method @InaccessibleFromKotlin public org.revdog.purchases.UpdatedCustomerInfoListener? getUpdatedCustomerInfoListener();
+    method public void invalidateCustomerInfoCache();
+    method @InaccessibleFromKotlin public boolean isAnonymous();
+    method @InaccessibleFromKotlin public static boolean isConfigured();
+    method public void logIn(String appUserID, org.revdog.purchases.LogInCallback callback);
+    method public void logOut(org.revdog.purchases.ReceiveCustomerInfoCallback callback);
+    method public void setAppBackgrounded(boolean backgrounded);
+    method @InaccessibleFromKotlin public static void setLogHandler(org.revdog.purchases.LogHandler);
+    method @InaccessibleFromKotlin public static void setLogLevel(org.revdog.purchases.LogLevel);
+    method @InaccessibleFromKotlin public void setUpdatedCustomerInfoListener(org.revdog.purchases.UpdatedCustomerInfoListener?);
+    property public String appUserID;
+    property public org.revdog.purchases.customerinfo.CustomerInfo? cachedCustomerInfo;
+    property public org.revdog.purchases.offerings.Offerings? cachedOfferings;
+    property public kotlinx.coroutines.flow.Flow<org.revdog.purchases.customerinfo.CustomerInfo> customerInfoFlow;
+    property public boolean isAnonymous;
+    property public org.revdog.purchases.UpdatedCustomerInfoListener? updatedCustomerInfoListener;
+    field public static final org.revdog.purchases.Purchases.Companion Companion;
+  }
+
+  public static final class Purchases.Companion {
+    method public org.revdog.purchases.Purchases configure(org.revdog.purchases.PurchasesConfiguration configuration);
+    method @InaccessibleFromKotlin public org.revdog.purchases.LogHandler getLogHandler();
+    method @InaccessibleFromKotlin public org.revdog.purchases.LogLevel getLogLevel();
+    method @InaccessibleFromKotlin public org.revdog.purchases.Purchases getSharedInstance();
+    method @InaccessibleFromKotlin public boolean isConfigured();
+    method @InaccessibleFromKotlin public void setLogHandler(org.revdog.purchases.LogHandler);
+    method @InaccessibleFromKotlin public void setLogLevel(org.revdog.purchases.LogLevel);
+    property public static boolean isConfigured;
+    property public static org.revdog.purchases.LogHandler logHandler;
+    property public static org.revdog.purchases.LogLevel logLevel;
+    property public static org.revdog.purchases.Purchases sharedInstance;
+  }
+
+  @dev.drewhamilton.poko.Poko public final class PurchasesAreCompletedBy {
+    method @InaccessibleFromKotlin public String getRawValue();
+    property public String rawValue;
+    field public static final org.revdog.purchases.PurchasesAreCompletedBy.Companion Companion;
+    field public static final org.revdog.purchases.PurchasesAreCompletedBy MY_APP;
+    field public static final org.revdog.purchases.PurchasesAreCompletedBy REVENUE_DOG;
+  }
+
+  public static final class PurchasesAreCompletedBy.Companion {
+    property public org.revdog.purchases.PurchasesAreCompletedBy MY_APP;
+    property public org.revdog.purchases.PurchasesAreCompletedBy REVENUE_DOG;
+  }
+
+  public final class PurchasesConfiguration {
+    method @InaccessibleFromKotlin public String getApiKey();
+    method @InaccessibleFromKotlin public String? getAppUserID();
+    method @InaccessibleFromKotlin public String getBaseURL();
+    method @InaccessibleFromKotlin public android.content.Context getContext();
+    method @InaccessibleFromKotlin public boolean getDiagnosticsEnabled();
+    method @InaccessibleFromKotlin public org.revdog.purchases.LogLevel getLogLevel();
+    method @InaccessibleFromKotlin public boolean getPendingTransactionsForPrepaidPlansEnabled();
+    method @InaccessibleFromKotlin public org.revdog.purchases.PurchasesAreCompletedBy getPurchasesCompletedBy();
+    property public String apiKey;
+    property public String? appUserID;
+    property public String baseURL;
+    property public android.content.Context context;
+    property public boolean diagnosticsEnabled;
+    property public org.revdog.purchases.LogLevel logLevel;
+    property public boolean pendingTransactionsForPrepaidPlansEnabled;
+    property public org.revdog.purchases.PurchasesAreCompletedBy purchasesCompletedBy;
+    field public static final org.revdog.purchases.PurchasesConfiguration.Companion Companion;
+    field public static final String DEFAULT_BASE_URL = "https://api.revdog.org";
+  }
+
+  public static final class PurchasesConfiguration.Builder {
+    ctor public PurchasesConfiguration.Builder(android.content.Context context, String apiKey);
+    method public org.revdog.purchases.PurchasesConfiguration.Builder appUserID(String? appUserID);
+    method public org.revdog.purchases.PurchasesConfiguration.Builder baseURL(String url);
+    method public org.revdog.purchases.PurchasesConfiguration build();
+    method public org.revdog.purchases.PurchasesConfiguration.Builder diagnosticsEnabled(boolean enabled);
+    method public org.revdog.purchases.PurchasesConfiguration.Builder logLevel(org.revdog.purchases.LogLevel level);
+    method public org.revdog.purchases.PurchasesConfiguration.Builder pendingTransactionsForPrepaidPlansEnabled(boolean enabled);
+    method public org.revdog.purchases.PurchasesConfiguration.Builder purchasesCompletedBy(org.revdog.purchases.PurchasesAreCompletedBy value);
+  }
+
+  public static final class PurchasesConfiguration.Companion {
+    property public static String DEFAULT_BASE_URL;
+  }
+
+  @dev.drewhamilton.poko.Poko public final class PurchasesError {
+    ctor public PurchasesError(org.revdog.purchases.PurchasesErrorCode code);
+    ctor public PurchasesError(org.revdog.purchases.PurchasesErrorCode code, optional String? underlyingErrorMessage);
+    ctor public PurchasesError(org.revdog.purchases.PurchasesErrorCode code, optional String? underlyingErrorMessage, optional Integer? backendCode);
+    ctor public PurchasesError(org.revdog.purchases.PurchasesErrorCode code, optional String? underlyingErrorMessage, optional Integer? backendCode, optional Integer? httpStatusCode);
+    method @InaccessibleFromKotlin public Integer? getBackendCode();
+    method @InaccessibleFromKotlin public org.revdog.purchases.PurchasesErrorCode getCode();
+    method @InaccessibleFromKotlin public Integer? getHttpStatusCode();
+    method @InaccessibleFromKotlin public String getMessage();
+    method @InaccessibleFromKotlin public String? getUnderlyingErrorMessage();
+    property public Integer? backendCode;
+    property public org.revdog.purchases.PurchasesErrorCode code;
+    property public Integer? httpStatusCode;
+    property public String message;
+    property public String? underlyingErrorMessage;
+    field public static final org.revdog.purchases.PurchasesError.Companion Companion;
+  }
+
+  public static final class PurchasesError.Companion {
+  }
+
+  public fun interface PurchasesErrorCallback {
+    method public void onError(org.revdog.purchases.PurchasesError error);
+  }
+
+  @dev.drewhamilton.poko.Poko public final class PurchasesErrorCode {
+    method public static org.revdog.purchases.PurchasesErrorCode fromCode(int code);
+    method @InaccessibleFromKotlin public int getCode();
+    method @InaccessibleFromKotlin public String getName();
+    property public int code;
+    property public String name;
+    field public static final java.util.List<org.revdog.purchases.PurchasesErrorCode> ALL;
+    field public static final org.revdog.purchases.PurchasesErrorCode.Companion Companion;
+    field public static final org.revdog.purchases.PurchasesErrorCode ConfigurationError;
+    field public static final org.revdog.purchases.PurchasesErrorCode CustomerInfoError;
+    field public static final org.revdog.purchases.PurchasesErrorCode EmptySubscriberAttributesError;
+    field public static final org.revdog.purchases.PurchasesErrorCode InvalidAppUserIdError;
+    field public static final org.revdog.purchases.PurchasesErrorCode InvalidAppleSubscriptionKeyError;
+    field public static final org.revdog.purchases.PurchasesErrorCode InvalidCredentialsError;
+    field public static final org.revdog.purchases.PurchasesErrorCode InvalidReceiptError;
+    field public static final org.revdog.purchases.PurchasesErrorCode MissingReceiptFileError;
+    field public static final org.revdog.purchases.PurchasesErrorCode NetworkError;
+    field public static final org.revdog.purchases.PurchasesErrorCode NotImplementedError;
+    field public static final org.revdog.purchases.PurchasesErrorCode OfflineConnectionError;
+    field public static final org.revdog.purchases.PurchasesErrorCode OperationAlreadyInProgressError;
+    field public static final org.revdog.purchases.PurchasesErrorCode ProductAlreadyPurchasedError;
+    field public static final org.revdog.purchases.PurchasesErrorCode ProductDiscountMissingIdentifierError;
+    field public static final org.revdog.purchases.PurchasesErrorCode ProductNotAvailableForPurchaseError;
+    field public static final org.revdog.purchases.PurchasesErrorCode PurchaseCancelledError;
+    field public static final org.revdog.purchases.PurchasesErrorCode PurchaseInvalidError;
+    field public static final org.revdog.purchases.PurchasesErrorCode PurchaseNotAllowedError;
+    field public static final org.revdog.purchases.PurchasesErrorCode PurchasePendingServerConfirmation;
+    field public static final org.revdog.purchases.PurchasesErrorCode PurchaseRejectedByServer;
+    field public static final org.revdog.purchases.PurchasesErrorCode ReceiptAlreadyInUseError;
+    field public static final org.revdog.purchases.PurchasesErrorCode StoreProblemError;
+    field public static final org.revdog.purchases.PurchasesErrorCode SystemInfoError;
+    field public static final org.revdog.purchases.PurchasesErrorCode UnexpectedBackendResponseError;
+    field public static final org.revdog.purchases.PurchasesErrorCode UnknownBackendError;
+    field public static final org.revdog.purchases.PurchasesErrorCode UnknownError;
+    field public static final org.revdog.purchases.PurchasesErrorCode UnsupportedError;
+  }
+
+  public static final class PurchasesErrorCode.Companion {
+    method public org.revdog.purchases.PurchasesErrorCode fromCode(int code);
+    property public java.util.List<org.revdog.purchases.PurchasesErrorCode> ALL;
+    property public org.revdog.purchases.PurchasesErrorCode ConfigurationError;
+    property public org.revdog.purchases.PurchasesErrorCode CustomerInfoError;
+    property public org.revdog.purchases.PurchasesErrorCode EmptySubscriberAttributesError;
+    property public org.revdog.purchases.PurchasesErrorCode InvalidAppUserIdError;
+    property public org.revdog.purchases.PurchasesErrorCode InvalidAppleSubscriptionKeyError;
+    property public org.revdog.purchases.PurchasesErrorCode InvalidCredentialsError;
+    property public org.revdog.purchases.PurchasesErrorCode InvalidReceiptError;
+    property public org.revdog.purchases.PurchasesErrorCode MissingReceiptFileError;
+    property public org.revdog.purchases.PurchasesErrorCode NetworkError;
+    property public org.revdog.purchases.PurchasesErrorCode NotImplementedError;
+    property public org.revdog.purchases.PurchasesErrorCode OfflineConnectionError;
+    property public org.revdog.purchases.PurchasesErrorCode OperationAlreadyInProgressError;
+    property public org.revdog.purchases.PurchasesErrorCode ProductAlreadyPurchasedError;
+    property public org.revdog.purchases.PurchasesErrorCode ProductDiscountMissingIdentifierError;
+    property public org.revdog.purchases.PurchasesErrorCode ProductNotAvailableForPurchaseError;
+    property public org.revdog.purchases.PurchasesErrorCode PurchaseCancelledError;
+    property public org.revdog.purchases.PurchasesErrorCode PurchaseInvalidError;
+    property public org.revdog.purchases.PurchasesErrorCode PurchaseNotAllowedError;
+    property public org.revdog.purchases.PurchasesErrorCode PurchasePendingServerConfirmation;
+    property public org.revdog.purchases.PurchasesErrorCode PurchaseRejectedByServer;
+    property public org.revdog.purchases.PurchasesErrorCode ReceiptAlreadyInUseError;
+    property public org.revdog.purchases.PurchasesErrorCode StoreProblemError;
+    property public org.revdog.purchases.PurchasesErrorCode SystemInfoError;
+    property public org.revdog.purchases.PurchasesErrorCode UnexpectedBackendResponseError;
+    property public org.revdog.purchases.PurchasesErrorCode UnknownBackendError;
+    property public org.revdog.purchases.PurchasesErrorCode UnknownError;
+    property public org.revdog.purchases.PurchasesErrorCode UnsupportedError;
+  }
+
+  public final class PurchasesException extends java.lang.Exception {
+    ctor public PurchasesException(org.revdog.purchases.PurchasesError error);
+    method @InaccessibleFromKotlin public org.revdog.purchases.PurchasesError getError();
+    property public org.revdog.purchases.PurchasesError error;
+  }
+
+  public interface ReceiveCustomerInfoCallback {
+    method public void onError(org.revdog.purchases.PurchasesError error);
+    method public void onReceived(org.revdog.purchases.customerinfo.CustomerInfo customerInfo);
+  }
+
+  public interface ReceiveOfferingsCallback {
+    method public void onError(org.revdog.purchases.PurchasesError error);
+    method public void onReceived(org.revdog.purchases.offerings.Offerings offerings);
+  }
+
+  @dev.drewhamilton.poko.Poko public final class Store {
+    method public static org.revdog.purchases.Store fromString(String? value);
+    method @InaccessibleFromKotlin public String getRawValue();
+    property public String rawValue;
+    field public static final java.util.List<org.revdog.purchases.Store> ALL;
+    field public static final org.revdog.purchases.Store AMAZON;
+    field public static final org.revdog.purchases.Store APP_STORE;
+    field public static final org.revdog.purchases.Store.Companion Companion;
+    field public static final org.revdog.purchases.Store MAC_APP_STORE;
+    field public static final org.revdog.purchases.Store PADDLE;
+    field public static final org.revdog.purchases.Store PLAY_STORE;
+    field public static final org.revdog.purchases.Store PROMOTIONAL;
+    field public static final org.revdog.purchases.Store ROKU;
+    field public static final org.revdog.purchases.Store STRIPE;
+    field public static final org.revdog.purchases.Store UNKNOWN;
+  }
+
+  public static final class Store.Companion {
+    method public org.revdog.purchases.Store fromString(String? value);
+    property public java.util.List<org.revdog.purchases.Store> ALL;
+    property public org.revdog.purchases.Store AMAZON;
+    property public org.revdog.purchases.Store APP_STORE;
+    property public org.revdog.purchases.Store MAC_APP_STORE;
+    property public org.revdog.purchases.Store PADDLE;
+    property public org.revdog.purchases.Store PLAY_STORE;
+    property public org.revdog.purchases.Store PROMOTIONAL;
+    property public org.revdog.purchases.Store ROKU;
+    property public org.revdog.purchases.Store STRIPE;
+    property public org.revdog.purchases.Store UNKNOWN;
+  }
+
+  public final class UncheckedPurchasesException extends java.lang.IllegalStateException {
+    ctor public UncheckedPurchasesException(org.revdog.purchases.PurchasesError error);
+    method @InaccessibleFromKotlin public org.revdog.purchases.PurchasesError getError();
+    property public org.revdog.purchases.PurchasesError error;
+  }
+
+  public fun interface UpdatedCustomerInfoListener {
+    method public void onReceived(org.revdog.purchases.customerinfo.CustomerInfo customerInfo);
+  }
+
+}
+
+package org.revdog.purchases.customerinfo {
+
+  public final class CustomerInfo {
+    method @InaccessibleFromKotlin public String? getAccountToken();
+    method @InaccessibleFromKotlin public java.util.Set<java.lang.String> getActiveSubscriptions();
+    method @InaccessibleFromKotlin public java.util.Map<java.lang.String,java.util.Date?> getAllExpirationDatesByProduct();
+    method @InaccessibleFromKotlin public java.util.Map<java.lang.String,java.util.Date?> getAllPurchaseDatesByProduct();
+    method @InaccessibleFromKotlin public java.util.Set<java.lang.String> getAllPurchasedProductIdentifiers();
+    method @InaccessibleFromKotlin public org.revdog.purchases.customerinfo.EntitlementInfos getEntitlements();
+    method @InaccessibleFromKotlin public java.util.Date? getFirstSeen();
+    method @InaccessibleFromKotlin public java.util.Date? getLastSeen();
+    method @InaccessibleFromKotlin public boolean getLoadedFromCache();
+    method @InaccessibleFromKotlin public android.net.Uri? getManagementURL();
+    method @InaccessibleFromKotlin public java.util.Map<java.lang.String,java.util.List<org.revdog.purchases.customerinfo.NonSubscriptionTransaction>> getNonSubscriptions();
+    method @InaccessibleFromKotlin public String getOriginalAppUserId();
+    method @InaccessibleFromKotlin public java.util.Date? getOriginalPurchaseDate();
+    method @InaccessibleFromKotlin public java.util.Date getRequestDate();
+    method @InaccessibleFromKotlin public java.util.Map<java.lang.String,org.revdog.purchases.customerinfo.SubscriptionInfo> getSubscriptions();
+    property public String? accountToken;
+    property public java.util.Set<java.lang.String> activeSubscriptions;
+    property public java.util.Map<java.lang.String,java.util.Date?> allExpirationDatesByProduct;
+    property public java.util.Map<java.lang.String,java.util.Date?> allPurchaseDatesByProduct;
+    property public java.util.Set<java.lang.String> allPurchasedProductIdentifiers;
+    property public org.revdog.purchases.customerinfo.EntitlementInfos entitlements;
+    property public java.util.Date? firstSeen;
+    property public java.util.Date? lastSeen;
+    property public boolean loadedFromCache;
+    property public android.net.Uri? managementURL;
+    property public java.util.Map<java.lang.String,java.util.List<org.revdog.purchases.customerinfo.NonSubscriptionTransaction>> nonSubscriptions;
+    property public String originalAppUserId;
+    property public java.util.Date? originalPurchaseDate;
+    property public java.util.Date requestDate;
+    property public java.util.Map<java.lang.String,org.revdog.purchases.customerinfo.SubscriptionInfo> subscriptions;
+  }
+
+  @dev.drewhamilton.poko.Poko public final class EntitlementInfo {
+    method @InaccessibleFromKotlin public java.util.Date? getBillingIssueDetectedAt();
+    method @InaccessibleFromKotlin public java.util.Date? getExpirationDate();
+    method @InaccessibleFromKotlin public String getIdentifier();
+    method @InaccessibleFromKotlin public java.util.Date? getLatestPurchaseDate();
+    method @InaccessibleFromKotlin public java.util.Date? getOriginalPurchaseDate();
+    method @InaccessibleFromKotlin public org.revdog.purchases.OwnershipType getOwnershipType();
+    method @InaccessibleFromKotlin public org.revdog.purchases.PeriodType getPeriodType();
+    method @InaccessibleFromKotlin public String getProductIdentifier();
+    method @InaccessibleFromKotlin public String? getProductPlanIdentifier();
+    method @InaccessibleFromKotlin public org.revdog.purchases.Store getStore();
+    method @InaccessibleFromKotlin public java.util.Date? getUnsubscribeDetectedAt();
+    method @InaccessibleFromKotlin public boolean getWillRenew();
+    method @InaccessibleFromKotlin public boolean isActive();
+    method @InaccessibleFromKotlin public boolean isLifetime();
+    method @InaccessibleFromKotlin public boolean isSandbox();
+    property public java.util.Date? billingIssueDetectedAt;
+    property public java.util.Date? expirationDate;
+    property public String identifier;
+    property public boolean isActive;
+    property public boolean isLifetime;
+    property public boolean isSandbox;
+    property public java.util.Date? latestPurchaseDate;
+    property public java.util.Date? originalPurchaseDate;
+    property public org.revdog.purchases.OwnershipType ownershipType;
+    property public org.revdog.purchases.PeriodType periodType;
+    property public String productIdentifier;
+    property public String? productPlanIdentifier;
+    property public org.revdog.purchases.Store store;
+    property public java.util.Date? unsubscribeDetectedAt;
+    property public boolean willRenew;
+  }
+
+  @dev.drewhamilton.poko.Poko public final class EntitlementInfos {
+    method public operator org.revdog.purchases.customerinfo.EntitlementInfo? get(String identifier);
+    method @InaccessibleFromKotlin public java.util.Map<java.lang.String,org.revdog.purchases.customerinfo.EntitlementInfo> getActive();
+    method @InaccessibleFromKotlin public java.util.Map<java.lang.String,org.revdog.purchases.customerinfo.EntitlementInfo> getAll();
+    property public java.util.Map<java.lang.String,org.revdog.purchases.customerinfo.EntitlementInfo> active;
+    property public java.util.Map<java.lang.String,org.revdog.purchases.customerinfo.EntitlementInfo> all;
+  }
+
+  @dev.drewhamilton.poko.Poko public final class NonSubscriptionTransaction {
+    method @InaccessibleFromKotlin public java.util.Date? getOriginalPurchaseDate();
+    method @InaccessibleFromKotlin public String getProductIdentifier();
+    method @InaccessibleFromKotlin public java.util.Date? getPurchaseDate();
+    method @InaccessibleFromKotlin public org.revdog.purchases.Store getStore();
+    method @InaccessibleFromKotlin public String? getStoreTransactionId();
+    method @InaccessibleFromKotlin public String getTransactionIdentifier();
+    method @InaccessibleFromKotlin public boolean isSandbox();
+    property public boolean isSandbox;
+    property public java.util.Date? originalPurchaseDate;
+    property public String productIdentifier;
+    property public java.util.Date? purchaseDate;
+    property public org.revdog.purchases.Store store;
+    property public String? storeTransactionId;
+    property public String transactionIdentifier;
+  }
+
+  @dev.drewhamilton.poko.Poko public final class SubscriptionInfo {
+    method @InaccessibleFromKotlin public java.util.Date? getAutoResumeDate();
+    method @InaccessibleFromKotlin public java.util.Date? getBillingIssuesDetectedAt();
+    method @InaccessibleFromKotlin public java.util.Date? getExpiresDate();
+    method @InaccessibleFromKotlin public java.util.Date? getGracePeriodExpiresDate();
+    method @InaccessibleFromKotlin public android.net.Uri? getManagementURL();
+    method @InaccessibleFromKotlin public java.util.Date? getOriginalPurchaseDate();
+    method @InaccessibleFromKotlin public org.revdog.purchases.OwnershipType getOwnershipType();
+    method @InaccessibleFromKotlin public org.revdog.purchases.PeriodType getPeriodType();
+    method @InaccessibleFromKotlin public String getProductIdentifier();
+    method @InaccessibleFromKotlin public String? getProductPlanIdentifier();
+    method @InaccessibleFromKotlin public java.util.Date? getPurchaseDate();
+    method @InaccessibleFromKotlin public java.util.Date? getRefundedAt();
+    method @InaccessibleFromKotlin public org.revdog.purchases.Store getStore();
+    method @InaccessibleFromKotlin public String? getStoreTransactionId();
+    method @InaccessibleFromKotlin public java.util.Date? getUnsubscribeDetectedAt();
+    method @InaccessibleFromKotlin public boolean isSandbox();
+    property public java.util.Date? autoResumeDate;
+    property public java.util.Date? billingIssuesDetectedAt;
+    property public java.util.Date? expiresDate;
+    property public java.util.Date? gracePeriodExpiresDate;
+    property public boolean isSandbox;
+    property public android.net.Uri? managementURL;
+    property public java.util.Date? originalPurchaseDate;
+    property public org.revdog.purchases.OwnershipType ownershipType;
+    property public org.revdog.purchases.PeriodType periodType;
+    property public String productIdentifier;
+    property public String? productPlanIdentifier;
+    property public java.util.Date? purchaseDate;
+    property public java.util.Date? refundedAt;
+    property public org.revdog.purchases.Store store;
+    property public String? storeTransactionId;
+    property public java.util.Date? unsubscribeDetectedAt;
+  }
+
+}
+
+package org.revdog.purchases.models {
+
+  @dev.drewhamilton.poko.Poko public final class Period {
+    ctor public Period(int value, org.revdog.purchases.models.Period.Unit unit, String iso8601);
+    method public static org.revdog.purchases.models.Period create(String iso8601);
+    method @InaccessibleFromKotlin public String getIso8601();
+    method @InaccessibleFromKotlin public org.revdog.purchases.models.Period.Unit getUnit();
+    method @InaccessibleFromKotlin public int getValue();
+    property public String iso8601;
+    property public org.revdog.purchases.models.Period.Unit unit;
+    property public int value;
+    field public static final org.revdog.purchases.models.Period.Companion Companion;
+  }
+
+  public static final class Period.Companion {
+    method public org.revdog.purchases.models.Period create(String iso8601);
+  }
+
+  @dev.drewhamilton.poko.Poko public static final class Period.Unit {
+    method @InaccessibleFromKotlin public String getRawValue();
+    property public String rawValue;
+    field public static final java.util.List<org.revdog.purchases.models.Period.Unit> ALL;
+    field public static final org.revdog.purchases.models.Period.Unit.Companion Companion;
+    field public static final org.revdog.purchases.models.Period.Unit DAY;
+    field public static final org.revdog.purchases.models.Period.Unit MONTH;
+    field public static final org.revdog.purchases.models.Period.Unit UNKNOWN;
+    field public static final org.revdog.purchases.models.Period.Unit WEEK;
+    field public static final org.revdog.purchases.models.Period.Unit YEAR;
+  }
+
+  public static final class Period.Unit.Companion {
+    property public java.util.List<org.revdog.purchases.models.Period.Unit> ALL;
+    property public org.revdog.purchases.models.Period.Unit DAY;
+    property public org.revdog.purchases.models.Period.Unit MONTH;
+    property public org.revdog.purchases.models.Period.Unit UNKNOWN;
+    property public org.revdog.purchases.models.Period.Unit WEEK;
+    property public org.revdog.purchases.models.Period.Unit YEAR;
+  }
+
+  @dev.drewhamilton.poko.Poko public final class Price {
+    ctor public Price(String formatted, long amountMicros, String currencyCode);
+    method @InaccessibleFromKotlin public long getAmountMicros();
+    method @InaccessibleFromKotlin public String getCurrencyCode();
+    method @InaccessibleFromKotlin public String getFormatted();
+    property public long amountMicros;
+    property public String currencyCode;
+    property public String formatted;
+  }
+
+  @dev.drewhamilton.poko.Poko public final class PricingPhase {
+    ctor public PricingPhase(org.revdog.purchases.models.Period billingPeriod, org.revdog.purchases.models.RecurrenceMode recurrenceMode, Integer? billingCycleCount, org.revdog.purchases.models.Price price);
+    method @InaccessibleFromKotlin public Integer? getBillingCycleCount();
+    method @InaccessibleFromKotlin public org.revdog.purchases.models.Period getBillingPeriod();
+    method @InaccessibleFromKotlin public org.revdog.purchases.models.Price getPrice();
+    method @InaccessibleFromKotlin public org.revdog.purchases.models.RecurrenceMode getRecurrenceMode();
+    property public Integer? billingCycleCount;
+    property public org.revdog.purchases.models.Period billingPeriod;
+    property public org.revdog.purchases.models.Price price;
+    property public org.revdog.purchases.models.RecurrenceMode recurrenceMode;
+  }
+
+  @dev.drewhamilton.poko.Poko public final class RecurrenceMode {
+    method public static org.revdog.purchases.models.RecurrenceMode fromIdentifier(Integer? identifier);
+    method @InaccessibleFromKotlin public Integer? getIdentifier();
+    method @InaccessibleFromKotlin public String getName();
+    property public Integer? identifier;
+    property public String name;
+    field public static final java.util.List<org.revdog.purchases.models.RecurrenceMode> ALL;
+    field public static final org.revdog.purchases.models.RecurrenceMode.Companion Companion;
+    field public static final org.revdog.purchases.models.RecurrenceMode FINITE_RECURRING;
+    field public static final org.revdog.purchases.models.RecurrenceMode INFINITE_RECURRING;
+    field public static final org.revdog.purchases.models.RecurrenceMode NON_RECURRING;
+    field public static final org.revdog.purchases.models.RecurrenceMode UNKNOWN;
+  }
+
+  public static final class RecurrenceMode.Companion {
+    method public org.revdog.purchases.models.RecurrenceMode fromIdentifier(Integer? identifier);
+    property public java.util.List<org.revdog.purchases.models.RecurrenceMode> ALL;
+    property public org.revdog.purchases.models.RecurrenceMode FINITE_RECURRING;
+    property public org.revdog.purchases.models.RecurrenceMode INFINITE_RECURRING;
+    property public org.revdog.purchases.models.RecurrenceMode NON_RECURRING;
+    property public org.revdog.purchases.models.RecurrenceMode UNKNOWN;
+  }
+
+  @dev.drewhamilton.poko.Poko public final class StoreProduct {
+    method @InaccessibleFromKotlin public String? getBasePlanId();
+    method @InaccessibleFromKotlin public org.revdog.purchases.models.SubscriptionOption? getDefaultOption();
+    method @InaccessibleFromKotlin public String getDescription();
+    method @InaccessibleFromKotlin public String getId();
+    method @InaccessibleFromKotlin public String getName();
+    method @InaccessibleFromKotlin public org.revdog.purchases.models.Period? getPeriod();
+    method @InaccessibleFromKotlin public org.revdog.purchases.models.Price getPrice();
+    method @InaccessibleFromKotlin public String getProductId();
+    method @InaccessibleFromKotlin public org.revdog.purchases.models.SubscriptionOptions? getSubscriptionOptions();
+    method @InaccessibleFromKotlin public String getTitle();
+    method @InaccessibleFromKotlin public org.revdog.purchases.ProductType getType();
+    property public String? basePlanId;
+    property public org.revdog.purchases.models.SubscriptionOption? defaultOption;
+    property public String description;
+    property public String id;
+    property public String name;
+    property public org.revdog.purchases.models.Period? period;
+    property public org.revdog.purchases.models.Price price;
+    property public String productId;
+    property public org.revdog.purchases.models.SubscriptionOptions? subscriptionOptions;
+    property public String title;
+    property public org.revdog.purchases.ProductType type;
+    field public static final String ID_SEPARATOR = ":";
+  }
+
+  @dev.drewhamilton.poko.Poko public final class SubscriptionOption {
+    method @InaccessibleFromKotlin public String getBasePlanId();
+    method @InaccessibleFromKotlin public org.revdog.purchases.models.Period? getBillingPeriod();
+    method @InaccessibleFromKotlin public org.revdog.purchases.models.PricingPhase? getFreePhase();
+    method @InaccessibleFromKotlin public org.revdog.purchases.models.PricingPhase? getFullPricePhase();
+    method @InaccessibleFromKotlin public String getId();
+    method @InaccessibleFromKotlin public org.revdog.purchases.models.PricingPhase? getIntroPhase();
+    method @InaccessibleFromKotlin public String? getOfferId();
+    method @InaccessibleFromKotlin public String getOfferToken();
+    method @InaccessibleFromKotlin public java.util.List<org.revdog.purchases.models.PricingPhase> getPricingPhases();
+    method @InaccessibleFromKotlin public String getProductId();
+    method @InaccessibleFromKotlin public java.util.List<java.lang.String> getTags();
+    method @InaccessibleFromKotlin public boolean isBasePlan();
+    method @InaccessibleFromKotlin public boolean isPrepaid();
+    property public String basePlanId;
+    property public org.revdog.purchases.models.Period? billingPeriod;
+    property public org.revdog.purchases.models.PricingPhase? freePhase;
+    property public org.revdog.purchases.models.PricingPhase? fullPricePhase;
+    property public String id;
+    property public org.revdog.purchases.models.PricingPhase? introPhase;
+    property public boolean isBasePlan;
+    property public boolean isPrepaid;
+    property public String? offerId;
+    property public String offerToken;
+    property public java.util.List<org.revdog.purchases.models.PricingPhase> pricingPhases;
+    property public String productId;
+    property public java.util.List<java.lang.String> tags;
+    field public static final String OFFER_ID_SEPARATOR = ":";
+  }
+
+  public final class SubscriptionOptions implements kotlin.jvm.internal.markers.KMappedMarker java.util.List<org.revdog.purchases.models.SubscriptionOption> {
+    method public operator boolean contains(org.revdog.purchases.models.SubscriptionOption element);
+    method public boolean containsAll(java.util.Collection<org.revdog.purchases.models.SubscriptionOption> elements);
+    method public operator org.revdog.purchases.models.SubscriptionOption get(int index);
+    method @InaccessibleFromKotlin public org.revdog.purchases.models.SubscriptionOption? getBasePlan();
+    method @InaccessibleFromKotlin public org.revdog.purchases.models.SubscriptionOption? getDefaultOffer();
+    method @InaccessibleFromKotlin public org.revdog.purchases.models.SubscriptionOption? getFreeTrial();
+    method @InaccessibleFromKotlin public org.revdog.purchases.models.SubscriptionOption? getIntroOffer();
+    method public int getSize();
+    method public int indexOf(org.revdog.purchases.models.SubscriptionOption element);
+    method public boolean isEmpty();
+    method public operator java.util.Iterator<org.revdog.purchases.models.SubscriptionOption> iterator();
+    method public int lastIndexOf(org.revdog.purchases.models.SubscriptionOption element);
+    method public java.util.ListIterator<org.revdog.purchases.models.SubscriptionOption> listIterator();
+    method public java.util.ListIterator<org.revdog.purchases.models.SubscriptionOption> listIterator(int index);
+    method public java.util.List<org.revdog.purchases.models.SubscriptionOption> subList(int fromIndex, int toIndex);
+    method public java.util.List<org.revdog.purchases.models.SubscriptionOption> withTag(String tag);
+    property public org.revdog.purchases.models.SubscriptionOption? basePlan;
+    property public org.revdog.purchases.models.SubscriptionOption? defaultOffer;
+    property public org.revdog.purchases.models.SubscriptionOption? freeTrial;
+    property public org.revdog.purchases.models.SubscriptionOption? introOffer;
+    property public int size;
+    field public static final String IGNORE_OFFER_TAG = "rd-ignore-offer";
+  }
+
+}
+
+package org.revdog.purchases.offerings {
+
+  @dev.drewhamilton.poko.Poko public final class Offering {
+    method public operator org.revdog.purchases.offerings.Package? get(String packageIdentifier);
+    method @InaccessibleFromKotlin public org.revdog.purchases.offerings.Package? getAnnual();
+    method @InaccessibleFromKotlin public java.util.List<org.revdog.purchases.offerings.Package> getAvailablePackages();
+    method @InaccessibleFromKotlin public String getIdentifier();
+    method @InaccessibleFromKotlin public org.revdog.purchases.offerings.Package? getLifetime();
+    method @InaccessibleFromKotlin public org.revdog.purchases.offerings.Package? getMonthly();
+    method public org.revdog.purchases.offerings.Package? getPackage(org.revdog.purchases.offerings.PackageType packageType);
+    method @InaccessibleFromKotlin public String getServerDescription();
+    method @InaccessibleFromKotlin public org.revdog.purchases.offerings.Package? getWeekly();
+    property public org.revdog.purchases.offerings.Package? annual;
+    property public java.util.List<org.revdog.purchases.offerings.Package> availablePackages;
+    property public String identifier;
+    property public org.revdog.purchases.offerings.Package? lifetime;
+    property public org.revdog.purchases.offerings.Package? monthly;
+    property public String serverDescription;
+    property public org.revdog.purchases.offerings.Package? weekly;
+  }
+
+  @dev.drewhamilton.poko.Poko public final class Offerings {
+    method public operator org.revdog.purchases.offerings.Offering? get(String identifier);
+    method @InaccessibleFromKotlin public java.util.Map<java.lang.String,org.revdog.purchases.offerings.Offering> getAll();
+    method @InaccessibleFromKotlin public org.revdog.purchases.offerings.Offering? getCurrent();
+    method @InaccessibleFromKotlin public String? getCurrentOfferingIdentifier();
+    method @InaccessibleFromKotlin public java.util.List<java.lang.String> getNotFoundProductIds();
+    property public java.util.Map<java.lang.String,org.revdog.purchases.offerings.Offering> all;
+    property public org.revdog.purchases.offerings.Offering? current;
+    property public String? currentOfferingIdentifier;
+    property public java.util.List<java.lang.String> notFoundProductIds;
+  }
+
+  @dev.drewhamilton.poko.Poko public final class Package {
+    method @InaccessibleFromKotlin public String getIdentifier();
+    method @InaccessibleFromKotlin public String getOfferingIdentifier();
+    method @InaccessibleFromKotlin public org.revdog.purchases.offerings.PackageType getPackageType();
+    method @InaccessibleFromKotlin public String getPlatformProductIdentifier();
+    method @InaccessibleFromKotlin public String? getPlatformProductPlanIdentifier();
+    method @InaccessibleFromKotlin public org.revdog.purchases.models.StoreProduct? getProduct();
+    property public String identifier;
+    property public String offeringIdentifier;
+    property public org.revdog.purchases.offerings.PackageType packageType;
+    property public String platformProductIdentifier;
+    property public String? platformProductPlanIdentifier;
+    property public org.revdog.purchases.models.StoreProduct? product;
+  }
+
+  @dev.drewhamilton.poko.Poko public final class PackageType {
+    method public static org.revdog.purchases.offerings.PackageType fromIdentifier(String identifier);
+    method @InaccessibleFromKotlin public String? getIdentifier();
+    method @InaccessibleFromKotlin public String getName();
+    property public String? identifier;
+    property public String name;
+    field public static final org.revdog.purchases.offerings.PackageType ANNUAL;
+    field public static final org.revdog.purchases.offerings.PackageType CUSTOM;
+    field public static final org.revdog.purchases.offerings.PackageType.Companion Companion;
+    field public static final java.util.List<org.revdog.purchases.offerings.PackageType> KNOWN;
+    field public static final org.revdog.purchases.offerings.PackageType LIFETIME;
+    field public static final org.revdog.purchases.offerings.PackageType MONTHLY;
+    field public static final org.revdog.purchases.offerings.PackageType SIX_MONTH;
+    field public static final org.revdog.purchases.offerings.PackageType THREE_MONTH;
+    field public static final org.revdog.purchases.offerings.PackageType TWO_MONTH;
+    field public static final org.revdog.purchases.offerings.PackageType UNKNOWN;
+    field public static final org.revdog.purchases.offerings.PackageType WEEKLY;
+  }
+
+  public static final class PackageType.Companion {
+    method public org.revdog.purchases.offerings.PackageType fromIdentifier(String identifier);
+    property public org.revdog.purchases.offerings.PackageType ANNUAL;
+    property public org.revdog.purchases.offerings.PackageType CUSTOM;
+    property public java.util.List<org.revdog.purchases.offerings.PackageType> KNOWN;
+    property public org.revdog.purchases.offerings.PackageType LIFETIME;
+    property public org.revdog.purchases.offerings.PackageType MONTHLY;
+    property public org.revdog.purchases.offerings.PackageType SIX_MONTH;
+    property public org.revdog.purchases.offerings.PackageType THREE_MONTH;
+    property public org.revdog.purchases.offerings.PackageType TWO_MONTH;
+    property public org.revdog.purchases.offerings.PackageType UNKNOWN;
+    property public org.revdog.purchases.offerings.PackageType WEEKLY;
+  }
+
+}
+
