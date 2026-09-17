@@ -8,13 +8,24 @@ import org.revdog.purchases.PurchasesError
 import org.revdog.purchases.PurchasesErrorCode
 import org.revdog.purchases.common.Delay
 import org.revdog.purchases.common.Dispatcher
+import org.revdog.purchases.PurchasesAreCompletedBy
 import org.revdog.purchases.customerinfo.CustomerInfo
 import org.revdog.purchases.customerinfo.CustomerInfoFactory
+import org.revdog.purchases.posting.PostReceiptErrorHandling
+import org.revdog.purchases.posting.PostReceiptResponse
+import org.revdog.purchases.posting.ReceiptInfo
+import org.revdog.purchases.posting.buildPostReceiptResponse
+import org.revdog.purchases.posting.classifyPostReceiptError
+import org.revdog.purchases.posting.toWireJson
+import org.json.JSONArray
 import java.io.IOException
 
 internal typealias CustomerInfoCallback = Pair<(CustomerInfo) -> Unit, (PurchasesError, isServerError: Boolean) -> Unit>
 internal typealias OfferingsCallback = Pair<(JSONObject) -> Unit, (PurchasesError, isServerError: Boolean) -> Unit>
 internal typealias LogInCallbackPair = Pair<(CustomerInfo, Boolean) -> Unit, (PurchasesError) -> Unit>
+internal typealias PostReceiptSuccessCallback = (PostReceiptResponse) -> Unit
+internal typealias PostReceiptErrorCallback = (PurchasesError, PostReceiptErrorHandling) -> Unit
+internal typealias PostReceiptCallbackPair = Pair<PostReceiptSuccessCallback, PostReceiptErrorCallback>
 
 /**
  * 端点门面 + **并发去重**。结构对照 RC `common/Backend.kt`。
@@ -44,6 +55,11 @@ internal class Backend(
     @Volatile
     @VisibleForTesting
     internal var identifyCallbacks = mutableMapOf<CallbackCacheKey, MutableList<LogInCallbackPair>>()
+
+    @get:Synchronized @set:Synchronized
+    @Volatile
+    @VisibleForTesting
+    internal var postReceiptCallbacks = mutableMapOf<CallbackCacheKey, MutableList<PostReceiptCallbackPair>>()
 
     fun close() {
         dispatcher.close()
@@ -199,6 +215,133 @@ internal class Backend(
 
     // endregion
 
+    // region POST /v1/receipts
+
+    /**
+     * 上报购买。body 形状以 `docs/plan/google-play-plan.md` §5 + `api-contract-v1.md` §2.1 为准，
+     * 结构对照 RC `Backend.postReceiptData`。
+     *
+     * 与 RC 的差异（每条都在设计 §5 登记过）：
+     * | 字段 | RC | 我方 |
+     * |---|---|---|
+     * | 价格 | `price`（Double，= micros / 1e6） | **`price_amount_micros`（Long）** —— Play 原生就是 micros |
+     * | `price_string` / `marketplace` | 作为**请求头**发（历史遗留） | `price_string` 进 **body**；`marketplace` 不发（Amazon 专用） |
+     * | `store_user_id` | 发（Amazon） | **不发** |
+     * | `proration_mode` | legacy Play 名 `IMMEDIATE_*` | 干净枚举名（ADR 0069 决策 4） |
+     * | `initiation_source` 第三值 | `unsynced_active_purchases` | 同（iOS 侧是 `queue`，考古 §2.6） |
+     *
+     * 并发去重的 key **必须把上报语义全带上**（考古 §2.13）：同一个 token 以
+     * `purchase` 与以 `restore` 上报是两件不同的事（`is_restore` 影响转移判定，ADR 0046 ②），
+     * 不能被合并成一次请求。
+     */
+    @Suppress("LongParameterList")
+    fun postReceiptData(
+        purchaseToken: String,
+        appUserID: String,
+        isRestore: Boolean,
+        receiptInfo: ReceiptInfo,
+        initiationSource: String,
+        purchasesAreCompletedBy: PurchasesAreCompletedBy,
+        appInBackground: Boolean,
+        onSuccess: PostReceiptSuccessCallback,
+        onError: PostReceiptErrorCallback,
+    ) {
+        val finishTransactions = purchasesAreCompletedBy == PurchasesAreCompletedBy.REVENUE_DOG
+        val cacheKey = CallbackCacheKey(
+            parts = listOf(
+                purchaseToken,
+                appUserID,
+                isRestore.toString(),
+                initiationSource,
+                purchasesAreCompletedBy.rawValue,
+                receiptInfo.toJson().toString(),
+            ),
+            appInBackground = appInBackground,
+        )
+        val body = receiptBody(
+            purchaseToken = purchaseToken,
+            appUserID = appUserID,
+            isRestore = isRestore,
+            receiptInfo = receiptInfo,
+            initiationSource = initiationSource,
+            purchasesAreCompletedBy = purchasesAreCompletedBy,
+            finishTransactions = finishTransactions,
+        )
+
+        val call = object : AsyncCall() {
+            override fun call(): HTTPResult = httpClient.performRequest(Endpoint.PostReceipt, body)
+
+            override fun onCompletion(result: HTTPResult) {
+                val callbacks = synchronized(this@Backend) { postReceiptCallbacks.remove(cacheKey) } ?: return
+                callbacks.forEach { (success, failure) ->
+                    if (result.isSuccessful()) {
+                        try {
+                            success(buildPostReceiptResponse(result))
+                        } catch (e: JSONException) {
+                            Logger.error(e) { "receipts 响应解析失败" }
+                            failure(
+                                PurchasesError(
+                                    PurchasesErrorCode.UnexpectedBackendResponseError,
+                                    "receipts 响应解析失败：${e.message}",
+                                ),
+                                // 解析不了不代表后端没落库 —— 按**可重试**处理，绝不 finish。
+                                PostReceiptErrorHandling.SHOULD_NOT_CONSUME,
+                            )
+                        }
+                    } else {
+                        failure(result.toPurchasesError(), classifyPostReceiptError(result.responseCode))
+                    }
+                }
+            }
+
+            override fun onError(error: PurchasesError) {
+                val callbacks = synchronized(this@Backend) { postReceiptCallbacks.remove(cacheKey) } ?: return
+                // 网络层失败：没有 HTTP 状态码 → 可重试。
+                callbacks.forEach { (_, failure) -> failure(error, classifyPostReceiptError(null)) }
+            }
+        }
+        synchronized(this) {
+            postReceiptCallbacks.addCallback(
+                call = call,
+                cacheKey = cacheKey,
+                functions = onSuccess to onError,
+                delay = Delay.jitterOnlyIfInBackground(appInBackground),
+            )
+        }
+    }
+
+    @Suppress("LongParameterList")
+    private fun receiptBody(
+        purchaseToken: String,
+        appUserID: String,
+        isRestore: Boolean,
+        receiptInfo: ReceiptInfo,
+        initiationSource: String,
+        purchasesAreCompletedBy: PurchasesAreCompletedBy,
+        finishTransactions: Boolean,
+    ): JSONObject = JSONObject().apply {
+        put(FETCH_TOKEN, purchaseToken)
+        put(APP_USER_ID, appUserID)
+        put(PRODUCT_IDS, JSONArray(receiptInfo.productIds))
+        put(PLATFORM_PRODUCT_IDS, JSONArray(receiptInfo.platformProductIds.map { it.toJson() }))
+        put(IS_RESTORE, isRestore)
+        put(INITIATION_SOURCE, initiationSource)
+        put(OBSERVER_MODE, !finishTransactions)
+        put(PURCHASE_COMPLETED_BY, purchasesAreCompletedBy.rawValue)
+        put(SDK_ORIGINATED, receiptInfo.sdkOriginated)
+        put(PAYLOAD_VERSION, POST_RECEIPT_PAYLOAD_VERSION)
+        receiptInfo.presentedOfferingIdentifier?.let { put(PRESENTED_OFFERING_IDENTIFIER, it) }
+        receiptInfo.presentedPlacementIdentifier?.let { put(PRESENTED_PLACEMENT_IDENTIFIER, it) }
+        receiptInfo.priceAmountMicros?.let { put(PRICE_AMOUNT_MICROS, it) }
+        receiptInfo.currency?.let { put(CURRENCY, it) }
+        receiptInfo.formattedPrice?.let { put(PRICE_STRING, it) }
+        receiptInfo.durationIso?.let { put(NORMAL_DURATION, it) }
+        receiptInfo.pricingPhases?.let { phases -> put(PRICING_PHASES, JSONArray(phases.map { it.toWireJson() })) }
+        receiptInfo.replacementMode?.let { put(PRORATION_MODE, it.wireName) }
+    }
+
+    // endregion
+
     private fun HTTPResult.buildCustomerInfoOrError(
         onSuccess: (CustomerInfo) -> Unit,
         onError: (PurchasesError, Boolean) -> Unit,
@@ -270,5 +413,30 @@ internal class Backend(
     internal companion object {
         const val APP_USER_ID: String = "app_user_id"
         const val NEW_APP_USER_ID: String = "new_app_user_id"
+
+        // POST /v1/receipts 的 body 键（`google-play-plan.md` §5）。
+        const val FETCH_TOKEN: String = "fetch_token"
+        const val PRODUCT_IDS: String = "product_ids"
+        const val PLATFORM_PRODUCT_IDS: String = "platform_product_ids"
+        const val IS_RESTORE: String = "is_restore"
+        const val INITIATION_SOURCE: String = "initiation_source"
+        const val OBSERVER_MODE: String = "observer_mode"
+        const val PURCHASE_COMPLETED_BY: String = "purchase_completed_by"
+        const val SDK_ORIGINATED: String = "sdk_originated"
+        const val PAYLOAD_VERSION: String = "payload_version"
+        const val PRESENTED_OFFERING_IDENTIFIER: String = "presented_offering_identifier"
+        const val PRESENTED_PLACEMENT_IDENTIFIER: String = "presented_placement_identifier"
+        const val PRICE_AMOUNT_MICROS: String = "price_amount_micros"
+        const val CURRENCY: String = "currency"
+        const val PRICE_STRING: String = "price_string"
+        const val NORMAL_DURATION: String = "normal_duration"
+        const val PRICING_PHASES: String = "pricing_phases"
+        const val PRORATION_MODE: String = "proration_mode"
+
+        /**
+         * 恒为 1。RC 的注释值得原样抄：**改动 POST receipt 的 payload 形状时才 +1，
+         * 且必须与 iOS SDK 保持同步**（考古 §2.1）。
+         */
+        const val POST_RECEIPT_PAYLOAD_VERSION: Int = 1
     }
 }

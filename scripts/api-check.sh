@@ -10,7 +10,7 @@ cd "$(dirname "$0")/.." || exit 1
 exit_code=0
 
 # 只让签名文件参与判定，免得无关的工作区脏文件把门禁搞挂。
-api_paths=(':(glob)sdk/android/**/api/*.api' ':(glob)sdk/android/**/api/*.txt')
+api_paths=(':(glob)**/api/*.api' ':(glob)**/api/*.txt')
 
 ./scripts/api-dump.sh || exit_code=$?
 

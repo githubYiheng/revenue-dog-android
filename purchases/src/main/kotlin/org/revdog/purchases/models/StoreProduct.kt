@@ -52,6 +52,22 @@ public class SubscriptionOption internal constructor(
     public val introPhase: PricingPhase?
         get() = pricingPhases.dropLast(1).firstOrNull { it.price.amountMicros > 0L }
 
+    /**
+     * 原始 `ProductDetails`。`launchBillingFlow` 要用它（对照 RC `GoogleSubscriptionOption.productDetails`）。
+     * 由 `Conversions.toStoreProduct` 在建好 [StoreProduct] 之后回填。
+     */
+    internal var productDetails: ProductDetails? = null
+        private set
+
+    /** 回指所属商品：上报时的价格 / 周期快照取自它。 */
+    internal var storeProduct: StoreProduct? = null
+        private set
+
+    internal fun attach(details: ProductDetails, product: StoreProduct): SubscriptionOption = apply {
+        productDetails = details
+        storeProduct = product
+    }
+
     internal companion object {
         const val OFFER_ID_SEPARATOR: String = ":"
     }
@@ -143,7 +159,12 @@ public class StoreProduct internal constructor(
     internal var productDetails: ProductDetails? = null
         private set
 
-    internal fun withProductDetails(details: ProductDetails): StoreProduct = apply { productDetails = details }
+    internal fun withProductDetails(details: ProductDetails): StoreProduct = apply {
+        productDetails = details
+        // option 也要拿到 details：`PurchaseParams.Builder(activity, subscriptionOption)` 是公开入口，
+        // 宿主从 offerings 里挑一个 offer 直接买时，SDK 手上只有这个 option。
+        subscriptionOptions?.forEach { it.attach(details, this) }
+    }
 
     internal companion object {
         const val ID_SEPARATOR: String = ":"

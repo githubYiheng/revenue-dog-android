@@ -70,3 +70,39 @@ public fun Purchases.logOutWith(
 private val LogErrorsDefault: (PurchasesError) -> Unit = { error ->
     Logger.error { error.toString() }
 }
+
+@JvmSynthetic
+public fun Purchases.purchaseWith(
+    purchaseParams: PurchaseParams,
+    onError: (error: PurchasesError, userCancelled: Boolean) -> Unit = LogPurchaseErrorsDefault,
+    onSuccess: (result: PurchaseResult) -> Unit,
+) {
+    purchase(
+        purchaseParams,
+        object : PurchaseCallback {
+            override fun onCompleted(result: PurchaseResult) = onSuccess(result)
+            override fun onError(error: PurchasesError, userCancelled: Boolean) = onError(error, userCancelled)
+        },
+    )
+}
+
+@JvmSynthetic
+public fun Purchases.restorePurchasesWith(
+    onError: (error: PurchasesError) -> Unit = LogErrorsDefault,
+    onSuccess: (customerInfo: CustomerInfo) -> Unit,
+) {
+    restorePurchases(receiveCustomerInfoCallback(onSuccess, onError))
+}
+
+@JvmSynthetic
+public fun Purchases.syncPurchasesWith(
+    onError: (error: PurchasesError) -> Unit = LogErrorsDefault,
+    onSuccess: (customerInfo: CustomerInfo) -> Unit,
+) {
+    syncPurchases(receiveCustomerInfoCallback(onSuccess, onError))
+}
+
+/** 购买失败的默认处置：**记 error 级日志**，绝不静默吞掉。 */
+private val LogPurchaseErrorsDefault: (PurchasesError, Boolean) -> Unit = { error, userCancelled ->
+    Logger.error { "$error（userCancelled=$userCancelled）" }
+}

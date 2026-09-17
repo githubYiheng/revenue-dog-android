@@ -11,6 +11,28 @@ package org.revdog.purchases.support
  */
 internal object Fixtures {
 
+    /**
+     * `POST /v1/receipts` 的成功响应 = 完整 Subscriber + **`purchased_products`**（考古 §2.8）。
+     *
+     * @param shouldConsumeByProductId `null` = 整个 `purchased_products` 字段缺失（契约违规）；
+     * map 里 value 为 `null` = 有条目但没有 `should_consume`（同样是契约违规）。
+     */
+    fun receiptResponse(shouldConsumeByProductId: Map<String, Boolean?>?): String {
+        val json = org.json.JSONObject(SUBSCRIBER_RESPONSE)
+        if (shouldConsumeByProductId != null) {
+            val purchased = org.json.JSONObject()
+            shouldConsumeByProductId.forEach { (productId, shouldConsume) ->
+                purchased.put(
+                    productId,
+                    org.json.JSONObject().apply { shouldConsume?.let { put("should_consume", it) } },
+                )
+            }
+            json.put("purchased_products", purchased)
+        }
+        return json.toString()
+    }
+
+
     const val SUBSCRIBER_RESPONSE: String = """
 {
   "request_date": "2019-07-26T17:40:10Z",

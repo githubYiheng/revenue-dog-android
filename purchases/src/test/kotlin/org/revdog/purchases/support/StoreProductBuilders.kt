@@ -83,3 +83,12 @@ internal object StoreProductBuilders {
     private fun formattedPrice(amountMicros: Long): String =
         if (amountMicros == 0L) "$0.00" else "$" + "%.2f".format(amountMicros / 1_000_000.0)
 }
+
+/**
+ * 给商品挂上一个 mock 的 `ProductDetails`。
+ *
+ * `ProductDetails` 的构造被 Play 藏起来了（没有公开构造器），而 `launchBillingFlow`
+ * 必须拿到它。mock 在这里是**唯一**选择，且无害：我方代码只把它原样转交给 Billing，
+ * 不读它的任何字段（`ProductDetails` → 我方模型的转换由 `ConversionsTest` 单独覆盖）。
+ */
+internal fun StoreProduct.withMockDetails(): StoreProduct = withProductDetails(io.mockk.mockk(relaxed = true))

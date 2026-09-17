@@ -26,6 +26,9 @@ package org.revdog.purchases {
     method @KotlinOnly @kotlin.jvm.JvmSynthetic public static suspend Object? awaitLogIn(org.revdog.purchases.Purchases, String appUserID, kotlin.coroutines.Continuation<? super org.revdog.purchases.LogInResult>);
     method @KotlinOnly @kotlin.jvm.JvmSynthetic public static suspend Object? awaitLogOut(org.revdog.purchases.Purchases, kotlin.coroutines.Continuation<? super org.revdog.purchases.customerinfo.CustomerInfo>);
     method @KotlinOnly @kotlin.jvm.JvmSynthetic public static suspend Object? awaitOfferings(org.revdog.purchases.Purchases, kotlin.coroutines.Continuation<? super org.revdog.purchases.offerings.Offerings>);
+    method @KotlinOnly @kotlin.jvm.JvmSynthetic public static suspend Object? awaitPurchase(org.revdog.purchases.Purchases, org.revdog.purchases.PurchaseParams purchaseParams, kotlin.coroutines.Continuation<? super org.revdog.purchases.PurchaseResult>);
+    method @KotlinOnly @kotlin.jvm.JvmSynthetic public static suspend Object? awaitRestore(org.revdog.purchases.Purchases, kotlin.coroutines.Continuation<? super org.revdog.purchases.customerinfo.CustomerInfo>);
+    method @KotlinOnly @kotlin.jvm.JvmSynthetic public static suspend Object? awaitSyncPurchases(org.revdog.purchases.Purchases, kotlin.coroutines.Continuation<? super org.revdog.purchases.customerinfo.CustomerInfo>);
   }
 
   @kotlin.RequiresOptIn(level=kotlin.RequiresOptIn.Level.ERROR, message="This API is internal to RevenueDog and may change or be removed without a major version bump.") @kotlin.annotation.Retention(kotlin.annotation.AnnotationRetention.BINARY) @kotlin.annotation.Target(allowedTargets={kotlin.annotation.AnnotationTarget.CLASS, kotlin.annotation.AnnotationTarget.FUNCTION, kotlin.annotation.AnnotationTarget.PROPERTY, kotlin.annotation.AnnotationTarget.CONSTRUCTOR, kotlin.annotation.AnnotationTarget.PROPERTY_GETTER, kotlin.annotation.AnnotationTarget.PROPERTY_SETTER}) public @interface InternalRevenueDogAPI {
@@ -36,6 +39,9 @@ package org.revdog.purchases {
     method @KotlinOnly @kotlin.jvm.JvmSynthetic public static void getOfferingsWith(org.revdog.purchases.Purchases, optional kotlin.jvm.functions.Function1<org.revdog.purchases.PurchasesError,kotlin.Unit> onError, kotlin.jvm.functions.Function1<org.revdog.purchases.offerings.Offerings,kotlin.Unit> onSuccess);
     method @KotlinOnly @kotlin.jvm.JvmSynthetic public static void logInWith(org.revdog.purchases.Purchases, String appUserID, optional kotlin.jvm.functions.Function1<org.revdog.purchases.PurchasesError,kotlin.Unit> onError, kotlin.jvm.functions.Function2<org.revdog.purchases.customerinfo.CustomerInfo,java.lang.Boolean,kotlin.Unit> onSuccess);
     method @KotlinOnly @kotlin.jvm.JvmSynthetic public static void logOutWith(org.revdog.purchases.Purchases, optional kotlin.jvm.functions.Function1<org.revdog.purchases.PurchasesError,kotlin.Unit> onError, kotlin.jvm.functions.Function1<org.revdog.purchases.customerinfo.CustomerInfo,kotlin.Unit> onSuccess);
+    method @KotlinOnly @kotlin.jvm.JvmSynthetic public static void purchaseWith(org.revdog.purchases.Purchases, org.revdog.purchases.PurchaseParams purchaseParams, optional kotlin.jvm.functions.Function2<org.revdog.purchases.PurchasesError,java.lang.Boolean,kotlin.Unit> onError, kotlin.jvm.functions.Function1<org.revdog.purchases.PurchaseResult,kotlin.Unit> onSuccess);
+    method @KotlinOnly @kotlin.jvm.JvmSynthetic public static void restorePurchasesWith(org.revdog.purchases.Purchases, optional kotlin.jvm.functions.Function1<org.revdog.purchases.PurchasesError,kotlin.Unit> onError, kotlin.jvm.functions.Function1<org.revdog.purchases.customerinfo.CustomerInfo,kotlin.Unit> onSuccess);
+    method @KotlinOnly @kotlin.jvm.JvmSynthetic public static void syncPurchasesWith(org.revdog.purchases.Purchases, optional kotlin.jvm.functions.Function1<org.revdog.purchases.PurchasesError,kotlin.Unit> onError, kotlin.jvm.functions.Function1<org.revdog.purchases.customerinfo.CustomerInfo,kotlin.Unit> onSuccess);
   }
 
   public interface LogHandler {
@@ -137,6 +143,39 @@ package org.revdog.purchases {
     property public org.revdog.purchases.ProductType UNKNOWN;
   }
 
+  public interface PurchaseCallback {
+    method public void onCompleted(org.revdog.purchases.PurchaseResult result);
+    method public void onError(org.revdog.purchases.PurchasesError error, boolean userCancelled);
+  }
+
+  public final class PurchaseParams {
+    method @InaccessibleFromKotlin public String? getOldProductId();
+    method @InaccessibleFromKotlin public org.revdog.purchases.ReplacementMode? getReplacementMode();
+    method @InaccessibleFromKotlin public Boolean? isPersonalizedPrice();
+    property public Boolean? isPersonalizedPrice;
+    property public String? oldProductId;
+    property public org.revdog.purchases.ReplacementMode? replacementMode;
+  }
+
+  public static final class PurchaseParams.Builder {
+    ctor public PurchaseParams.Builder(android.app.Activity activity, org.revdog.purchases.models.StoreProduct storeProduct);
+    ctor public PurchaseParams.Builder(android.app.Activity activity, org.revdog.purchases.models.SubscriptionOption subscriptionOption);
+    ctor public PurchaseParams.Builder(android.app.Activity activity, org.revdog.purchases.offerings.Package packageToPurchase);
+    method public org.revdog.purchases.PurchaseParams build();
+    method public org.revdog.purchases.PurchaseParams.Builder isPersonalizedPrice(boolean isPersonalizedPrice);
+    method public org.revdog.purchases.PurchaseParams.Builder oldProductId(String oldProductId);
+    method public org.revdog.purchases.PurchaseParams.Builder replacementMode(org.revdog.purchases.ReplacementMode replacementMode);
+  }
+
+  @dev.drewhamilton.poko.Poko public final class PurchaseResult {
+    method @InaccessibleFromKotlin public org.revdog.purchases.customerinfo.CustomerInfo getCustomerInfo();
+    method @InaccessibleFromKotlin public org.revdog.purchases.models.StoreTransaction? getStoreTransaction();
+    method @InaccessibleFromKotlin public boolean isPending();
+    property public org.revdog.purchases.customerinfo.CustomerInfo customerInfo;
+    property public boolean isPending;
+    property public org.revdog.purchases.models.StoreTransaction? storeTransaction;
+  }
+
   public final class Purchases {
     method public static org.revdog.purchases.Purchases configure(org.revdog.purchases.PurchasesConfiguration configuration);
     method @InaccessibleFromKotlin public String getAppUserID();
@@ -155,10 +194,13 @@ package org.revdog.purchases {
     method @InaccessibleFromKotlin public static boolean isConfigured();
     method public void logIn(String appUserID, org.revdog.purchases.LogInCallback callback);
     method public void logOut(org.revdog.purchases.ReceiveCustomerInfoCallback callback);
+    method public void purchase(org.revdog.purchases.PurchaseParams purchaseParams, org.revdog.purchases.PurchaseCallback callback);
+    method public void restorePurchases(org.revdog.purchases.ReceiveCustomerInfoCallback callback);
     method public void setAppBackgrounded(boolean backgrounded);
     method @InaccessibleFromKotlin public static void setLogHandler(org.revdog.purchases.LogHandler);
     method @InaccessibleFromKotlin public static void setLogLevel(org.revdog.purchases.LogLevel);
     method @InaccessibleFromKotlin public void setUpdatedCustomerInfoListener(org.revdog.purchases.UpdatedCustomerInfoListener?);
+    method public void syncPurchases(org.revdog.purchases.ReceiveCustomerInfoCallback callback);
     property public String appUserID;
     property public org.revdog.purchases.customerinfo.CustomerInfo? cachedCustomerInfo;
     property public org.revdog.purchases.offerings.Offerings? cachedOfferings;
@@ -339,6 +381,31 @@ package org.revdog.purchases {
   public interface ReceiveOfferingsCallback {
     method public void onError(org.revdog.purchases.PurchasesError error);
     method public void onReceived(org.revdog.purchases.offerings.Offerings offerings);
+  }
+
+  @dev.drewhamilton.poko.Poko public final class ReplacementMode {
+    method public static org.revdog.purchases.ReplacementMode? fromWireName(String? value);
+    method @InaccessibleFromKotlin public String getName();
+    method @InaccessibleFromKotlin public String getWireName();
+    property public String name;
+    property public String wireName;
+    field public static final java.util.List<org.revdog.purchases.ReplacementMode> ALL;
+    field public static final org.revdog.purchases.ReplacementMode CHARGE_FULL_PRICE;
+    field public static final org.revdog.purchases.ReplacementMode CHARGE_PRORATED_PRICE;
+    field public static final org.revdog.purchases.ReplacementMode.Companion Companion;
+    field public static final org.revdog.purchases.ReplacementMode DEFERRED;
+    field public static final org.revdog.purchases.ReplacementMode WITHOUT_PRORATION;
+    field public static final org.revdog.purchases.ReplacementMode WITH_TIME_PRORATION;
+  }
+
+  public static final class ReplacementMode.Companion {
+    method public org.revdog.purchases.ReplacementMode? fromWireName(String? value);
+    property public java.util.List<org.revdog.purchases.ReplacementMode> ALL;
+    property public org.revdog.purchases.ReplacementMode CHARGE_FULL_PRICE;
+    property public org.revdog.purchases.ReplacementMode CHARGE_PRORATED_PRICE;
+    property public org.revdog.purchases.ReplacementMode DEFERRED;
+    property public org.revdog.purchases.ReplacementMode WITHOUT_PRORATION;
+    property public org.revdog.purchases.ReplacementMode WITH_TIME_PRORATION;
   }
 
   @dev.drewhamilton.poko.Poko public final class Store {
@@ -575,6 +642,25 @@ package org.revdog.purchases.models {
     property public org.revdog.purchases.models.RecurrenceMode recurrenceMode;
   }
 
+  @dev.drewhamilton.poko.Poko public final class PurchaseState {
+    method public static org.revdog.purchases.models.PurchaseState fromPlayCode(int code);
+    method @InaccessibleFromKotlin public String getRawValue();
+    property public String rawValue;
+    field public static final java.util.List<org.revdog.purchases.models.PurchaseState> ALL;
+    field public static final org.revdog.purchases.models.PurchaseState.Companion Companion;
+    field public static final org.revdog.purchases.models.PurchaseState PENDING;
+    field public static final org.revdog.purchases.models.PurchaseState PURCHASED;
+    field public static final org.revdog.purchases.models.PurchaseState UNSPECIFIED_STATE;
+  }
+
+  public static final class PurchaseState.Companion {
+    method public org.revdog.purchases.models.PurchaseState fromPlayCode(int code);
+    property public java.util.List<org.revdog.purchases.models.PurchaseState> ALL;
+    property public org.revdog.purchases.models.PurchaseState PENDING;
+    property public org.revdog.purchases.models.PurchaseState PURCHASED;
+    property public org.revdog.purchases.models.PurchaseState UNSPECIFIED_STATE;
+  }
+
   @dev.drewhamilton.poko.Poko public final class RecurrenceMode {
     method public static org.revdog.purchases.models.RecurrenceMode fromIdentifier(Integer? identifier);
     method @InaccessibleFromKotlin public Integer? getIdentifier();
@@ -622,6 +708,31 @@ package org.revdog.purchases.models {
     property public String title;
     property public org.revdog.purchases.ProductType type;
     field public static final String ID_SEPARATOR = ":";
+  }
+
+  @dev.drewhamilton.poko.Poko public final class StoreTransaction {
+    method @InaccessibleFromKotlin public String? getOrderId();
+    method @InaccessibleFromKotlin public String? getPresentedOfferingIdentifier();
+    method @InaccessibleFromKotlin public java.util.List<java.lang.String> getProductIds();
+    method @InaccessibleFromKotlin public org.revdog.purchases.models.PurchaseState getPurchaseState();
+    method @InaccessibleFromKotlin public long getPurchaseTime();
+    method @InaccessibleFromKotlin public String getPurchaseToken();
+    method @InaccessibleFromKotlin public org.revdog.purchases.ReplacementMode? getReplacementMode();
+    method @InaccessibleFromKotlin public String? getSubscriptionOptionId();
+    method @InaccessibleFromKotlin public org.revdog.purchases.ProductType getType();
+    method @InaccessibleFromKotlin public boolean isAcknowledged();
+    method @InaccessibleFromKotlin public Boolean? isAutoRenewing();
+    property public boolean isAcknowledged;
+    property public Boolean? isAutoRenewing;
+    property public String? orderId;
+    property public String? presentedOfferingIdentifier;
+    property public java.util.List<java.lang.String> productIds;
+    property public org.revdog.purchases.models.PurchaseState purchaseState;
+    property public long purchaseTime;
+    property public String purchaseToken;
+    property public org.revdog.purchases.ReplacementMode? replacementMode;
+    property public String? subscriptionOptionId;
+    property public org.revdog.purchases.ProductType type;
   }
 
   @dev.drewhamilton.poko.Poko public final class SubscriptionOption {

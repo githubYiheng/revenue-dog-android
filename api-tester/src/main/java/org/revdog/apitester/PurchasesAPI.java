@@ -1,5 +1,6 @@
 package org.revdog.apitester;
 
+import android.app.Activity;
 import android.content.Context;
 import android.net.Uri;
 
@@ -9,6 +10,9 @@ import org.revdog.purchases.LogLevel;
 import org.revdog.purchases.OwnershipType;
 import org.revdog.purchases.PeriodType;
 import org.revdog.purchases.ProductType;
+import org.revdog.purchases.PurchaseCallback;
+import org.revdog.purchases.PurchaseParams;
+import org.revdog.purchases.PurchaseResult;
 import org.revdog.purchases.Purchases;
 import org.revdog.purchases.PurchasesAreCompletedBy;
 import org.revdog.purchases.PurchasesConfiguration;
@@ -16,6 +20,7 @@ import org.revdog.purchases.PurchasesError;
 import org.revdog.purchases.PurchasesErrorCode;
 import org.revdog.purchases.ReceiveCustomerInfoCallback;
 import org.revdog.purchases.ReceiveOfferingsCallback;
+import org.revdog.purchases.ReplacementMode;
 import org.revdog.purchases.Store;
 import org.revdog.purchases.UpdatedCustomerInfoListener;
 import org.revdog.purchases.customerinfo.CustomerInfo;
@@ -24,6 +29,8 @@ import org.revdog.purchases.customerinfo.EntitlementInfos;
 import org.revdog.purchases.customerinfo.NonSubscriptionTransaction;
 import org.revdog.purchases.customerinfo.SubscriptionInfo;
 import org.revdog.purchases.models.Period;
+import org.revdog.purchases.models.PurchaseState;
+import org.revdog.purchases.models.StoreTransaction;
 import org.revdog.purchases.models.Price;
 import org.revdog.purchases.models.PricingPhase;
 import org.revdog.purchases.models.RecurrenceMode;
@@ -412,6 +419,99 @@ final class PurchasesAPI {
         PurchasesError constructed = new PurchasesError(PurchasesErrorCode.NetworkError);
         PurchasesError withMessage = new PurchasesError(PurchasesErrorCode.NetworkError, "offline");
         PurchasesError full = new PurchasesError(PurchasesErrorCode.NetworkError, "offline", 7000, 503);
+    }
+
+    static void checkPurchaseParams(Activity activity, Package packageToPurchase, StoreProduct product) {
+        PurchaseParams fromPackage = new PurchaseParams.Builder(activity, packageToPurchase).build();
+        PurchaseParams fromProduct = new PurchaseParams.Builder(activity, product).build();
+        SubscriptionOption option = product.getDefaultOption();
+        if (option != null) {
+            PurchaseParams fromOption = new PurchaseParams.Builder(activity, option).build();
+        }
+        PurchaseParams upgrade = new PurchaseParams.Builder(activity, product)
+                .oldProductId("sub_basic")
+                .replacementMode(ReplacementMode.CHARGE_PRORATED_PRICE)
+                .isPersonalizedPrice(true)
+                .build();
+        String oldProductId = upgrade.getOldProductId();
+        ReplacementMode replacementMode = upgrade.getReplacementMode();
+        Boolean personalized = upgrade.isPersonalizedPrice();
+    }
+
+    static void checkReplacementMode() {
+        List<ReplacementMode> modes = ReplacementMode.ALL;
+        ReplacementMode[] all = new ReplacementMode[]{
+                ReplacementMode.WITHOUT_PRORATION,
+                ReplacementMode.WITH_TIME_PRORATION,
+                ReplacementMode.CHARGE_FULL_PRICE,
+                ReplacementMode.CHARGE_PRORATED_PRICE,
+                ReplacementMode.DEFERRED,
+        };
+        String name = ReplacementMode.DEFERRED.getName();
+        String wireName = ReplacementMode.DEFERRED.getWireName();
+        ReplacementMode parsed = ReplacementMode.fromWireName("DEFERRED");
+    }
+
+    static void checkPurchase(Purchases purchases, PurchaseParams params) {
+        purchases.purchase(params, new PurchaseCallback() {
+            @Override
+            public void onCompleted(PurchaseResult result) {
+                checkPurchaseResult(result);
+            }
+
+            @Override
+            public void onError(PurchasesError error, boolean userCancelled) { }
+        });
+
+        purchases.restorePurchases(new ReceiveCustomerInfoCallback() {
+            @Override
+            public void onReceived(CustomerInfo customerInfo) { }
+
+            @Override
+            public void onError(PurchasesError error) { }
+        });
+
+        purchases.syncPurchases(new ReceiveCustomerInfoCallback() {
+            @Override
+            public void onReceived(CustomerInfo customerInfo) { }
+
+            @Override
+            public void onError(PurchasesError error) { }
+        });
+    }
+
+    static void checkPurchaseResult(PurchaseResult result) {
+        CustomerInfo customerInfo = result.getCustomerInfo();
+        StoreTransaction transaction = result.getStoreTransaction();
+        boolean isPending = result.isPending();
+        if (transaction != null) {
+            checkStoreTransaction(transaction);
+        }
+    }
+
+    static void checkStoreTransaction(StoreTransaction transaction) {
+        String orderId = transaction.getOrderId();
+        List<String> productIds = transaction.getProductIds();
+        ProductType type = transaction.getType();
+        long purchaseTime = transaction.getPurchaseTime();
+        String purchaseToken = transaction.getPurchaseToken();
+        PurchaseState state = transaction.getPurchaseState();
+        Boolean isAutoRenewing = transaction.isAutoRenewing();
+        boolean isAcknowledged = transaction.isAcknowledged();
+        String offering = transaction.getPresentedOfferingIdentifier();
+        String optionId = transaction.getSubscriptionOptionId();
+        ReplacementMode replacementMode = transaction.getReplacementMode();
+    }
+
+    static void checkPurchaseState() {
+        List<PurchaseState> states = PurchaseState.ALL;
+        PurchaseState[] all = new PurchaseState[]{
+                PurchaseState.UNSPECIFIED_STATE,
+                PurchaseState.PURCHASED,
+                PurchaseState.PENDING,
+        };
+        String raw = PurchaseState.PURCHASED.getRawValue();
+        PurchaseState parsed = PurchaseState.fromPlayCode(1);
     }
 
     private PurchasesAPI() { }

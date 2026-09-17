@@ -21,3 +21,28 @@ internal class DirectDispatcher : Dispatcher(Executors.newSingleThreadScheduledE
 
     override fun isClosed(): Boolean = false
 }
+
+/**
+ * 把任务攒起来，`runAll()` 才真跑。
+ *
+ * 用它才能观察到 `Backend` 的**并发去重**：同步执行的 dispatcher 下第一次调用在第二次
+ * 开始前就已经完成、cache key 已被移除，合并行为根本不会发生。
+ */
+internal class DeferredDispatcher : Dispatcher(Executors.newSingleThreadScheduledExecutor(), null) {
+
+    private val queued: MutableList<Runnable> = mutableListOf()
+
+    override fun enqueue(command: Runnable, delay: Delay) {
+        queued += command
+    }
+
+    fun runAll() {
+        val toRun = queued.toList()
+        queued.clear()
+        toRun.forEach { it.run() }
+    }
+
+    override fun close() = Unit
+
+    override fun isClosed(): Boolean = false
+}

@@ -82,3 +82,57 @@ public suspend fun Purchases.awaitLogOut(): CustomerInfo = suspendCancellableCor
         },
     )
 }
+
+/**
+ * 购买的协程形态。
+ *
+ * **用户取消也会抛** [PurchasesException]（`code = purchaseCancelledError`）——
+ * 挂起函数没有「第二个返回值」的位置，把 `userCancelled` 塞进错误码是唯一诚实的做法。
+ * 需要区分「取消」与「失败」的宿主按 `error.code` 判断，或用 callback / `purchaseWith` 形态。
+ */
+@JvmSynthetic
+public suspend fun Purchases.awaitPurchase(purchaseParams: PurchaseParams): PurchaseResult =
+    suspendCancellableCoroutine { continuation ->
+        purchase(
+            purchaseParams,
+            object : PurchaseCallback {
+                override fun onCompleted(result: PurchaseResult) {
+                    if (continuation.isActive) continuation.resume(result)
+                }
+
+                override fun onError(error: PurchasesError, userCancelled: Boolean) {
+                    if (continuation.isActive) continuation.resumeWithException(PurchasesException(error))
+                }
+            },
+        )
+    }
+
+@JvmSynthetic
+public suspend fun Purchases.awaitRestore(): CustomerInfo = suspendCancellableCoroutine { continuation ->
+    restorePurchases(
+        object : ReceiveCustomerInfoCallback {
+            override fun onReceived(customerInfo: CustomerInfo) {
+                if (continuation.isActive) continuation.resume(customerInfo)
+            }
+
+            override fun onError(error: PurchasesError) {
+                if (continuation.isActive) continuation.resumeWithException(PurchasesException(error))
+            }
+        },
+    )
+}
+
+@JvmSynthetic
+public suspend fun Purchases.awaitSyncPurchases(): CustomerInfo = suspendCancellableCoroutine { continuation ->
+    syncPurchases(
+        object : ReceiveCustomerInfoCallback {
+            override fun onReceived(customerInfo: CustomerInfo) {
+                if (continuation.isActive) continuation.resume(customerInfo)
+            }
+
+            override fun onError(error: PurchasesError) {
+                if (continuation.isActive) continuation.resumeWithException(PurchasesException(error))
+            }
+        },
+    )
+}

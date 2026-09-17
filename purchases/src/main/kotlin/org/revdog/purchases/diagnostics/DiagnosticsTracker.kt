@@ -35,6 +35,25 @@ internal interface DiagnosticsTracker {
         const val EVENT_BILLING_QUERY: String = "billing_query"
         const val EVENT_BILLING_PURCHASE_UPDATE: String = "billing_purchase_update"
         const val EVENT_CONSUME_DECISION: String = "consume_decision"
+
+        // M2 购买闭环的打点。M3 只换实现（真实队列 + 攒批上传），事件名与字段不再动。
+        const val EVENT_PURCHASE_STARTED: String = "purchase_started"
+        const val EVENT_PURCHASE_RESULT: String = "purchase_result"
+        const val EVENT_RECEIPT_POST: String = "receipt_post"
+        const val EVENT_PURCHASE_PENDING: String = "purchase_pending"
+        const val EVENT_RESTORE_PURCHASES: String = "restore_purchases"
+        const val EVENT_SYNC_PURCHASES: String = "sync_purchases"
+
+        /** [EVENT_PURCHASE_RESULT] 的 outcome 取值。 */
+        const val OUTCOME_COMPLETED: String = "completed"
+        const val OUTCOME_PENDING: String = "pending"
+        const val OUTCOME_CANCELLED: String = "cancelled"
+        const val OUTCOME_FAILED: String = "failed"
+
+        /** [EVENT_RECEIPT_POST] 的 outcome 取值（与 901 / 902 的分类一一对应）。 */
+        const val OUTCOME_SUCCESS: String = "success"
+        const val OUTCOME_RETRYABLE: String = "retryable"
+        const val OUTCOME_REJECTED: String = "rejected"
     }
 }
 

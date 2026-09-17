@@ -1,9 +1,13 @@
 package org.revdog.purchases.google
 
 import com.android.billingclient.api.ProductDetails
+import com.android.billingclient.api.Purchase
 import org.revdog.purchases.Logger
 import org.revdog.purchases.ProductType
+import org.revdog.purchases.ReplacementMode
 import org.revdog.purchases.models.Period
+import org.revdog.purchases.models.PurchaseState
+import org.revdog.purchases.models.StoreTransaction
 import org.revdog.purchases.models.Price
 import org.revdog.purchases.models.PricingPhase
 import org.revdog.purchases.models.RecurrenceMode
@@ -113,3 +117,33 @@ private fun ProductDetails.createOneTimeProductPrice(): Price? {
         Price(it.formattedPrice, it.priceAmountMicros, it.priceCurrencyCode)
     }
 }
+
+/**
+ * `Purchase` → [StoreTransaction]。结构对照 RC `google/storeTransactionConversions.kt`。
+ *
+ * Play 只给 token / productIds / 时间 / 状态 / ack 标志 / 续订标志；
+ * [subscriptionOptionId] / [presentedOfferingIdentifier] / [replacementMode] 来自
+ * 购买发起时落盘的上下文（`PendingPurchaseStore`），**应用外购买一律为 `null`**。
+ *
+ * `fetch_token` 用的是 `purchaseToken` **原文**，不做任何编码（考古 §2.2）。
+ */
+@Suppress("LongParameterList")
+internal fun Purchase.toStoreTransaction(
+    type: ProductType,
+    subscriptionOptionId: String? = null,
+    presentedOfferingIdentifier: String? = null,
+    replacementMode: ReplacementMode? = null,
+): StoreTransaction = StoreTransaction(
+    orderId = orderId?.takeIf { it.isNotBlank() },
+    productIds = products,
+    type = type,
+    purchaseTime = purchaseTime,
+    purchaseToken = purchaseToken,
+    purchaseState = PurchaseState.fromPlayCode(purchaseState),
+    // 一次性商品上 Play 恒返回 false，带上去只会让后端以为「被取消了」。
+    isAutoRenewing = if (type == ProductType.SUBS) isAutoRenewing else null,
+    isAcknowledged = isAcknowledged,
+    presentedOfferingIdentifier = presentedOfferingIdentifier,
+    subscriptionOptionId = subscriptionOptionId,
+    replacementMode = replacementMode,
+).withOriginalPurchase(this)

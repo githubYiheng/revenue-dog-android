@@ -36,3 +36,18 @@ public interface LogInCallback {
 public fun interface UpdatedCustomerInfoListener {
     public fun onReceived(customerInfo: CustomerInfo)
 }
+
+/**
+ * 购买回调（对照 RC `PurchaseCallback`）。
+ *
+ * **偏离 RC 的形状**：RC 的成功面是 `onCompleted(storeTransaction, customerInfo)` 两个参数，
+ * 没有「pending」这一档，`PENDING` 交易走的是 `onError(PaymentPendingError)`。
+ * 我方与 iOS 对齐成一个 [PurchaseResult]，把 pending 做成**显式的成功态标志**：
+ * 用户此刻既不该拿到权益、也不该看到错误（设计 §3 第 4 步）。
+ */
+public interface PurchaseCallback {
+    public fun onCompleted(result: PurchaseResult)
+
+    /** [userCancelled] = 用户自己关掉了 Play 的付款弹窗。宿主通常不该为它弹错误提示。 */
+    public fun onError(error: PurchasesError, userCancelled: Boolean)
+}

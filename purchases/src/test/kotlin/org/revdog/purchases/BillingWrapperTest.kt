@@ -1,19 +1,29 @@
 package org.revdog.purchases
 
+import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import androidx.test.core.app.ApplicationProvider
 import com.android.billingclient.api.BillingClient
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.revdog.purchases.caching.DeviceCache
+import org.revdog.purchases.caching.PendingPurchase
+import org.revdog.purchases.diagnostics.NoOpDiagnosticsTracker
 import org.revdog.purchases.google.BillingWrapper
 import org.revdog.purchases.google.IN_APP_BILLING_LESS_THAN_3_ERROR_MESSAGE
 import org.revdog.purchases.google.PLAY_STORE_BLOCKED_ERROR_MESSAGE_FRAGMENT
 import org.revdog.purchases.google.toSetupError
+import org.revdog.purchases.posting.PlatformProductId
+import org.revdog.purchases.posting.ReceiptInfo
 import org.revdog.purchases.support.FakeBillingClientFixture
 import org.revdog.purchases.support.FakeBillingClientFixture.Companion.billingResult
+import org.revdog.purchases.support.FakeHTTPClient
 import org.revdog.purchases.support.RecordingDelayedRunner
+import org.revdog.purchases.support.RecordingPurchasesUpdatedListener
+import org.revdog.purchases.support.purchaseFixture
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 
@@ -23,18 +33,22 @@ class BillingWrapperTest {
     private lateinit var fixture: FakeBillingClientFixture
     private lateinit var runner: RecordingDelayedRunner
     private lateinit var wrapper: BillingWrapper
+    private lateinit var listener: RecordingPurchasesUpdatedListener
 
     @Before
     fun setUp() {
         fixture = FakeBillingClientFixture()
         runner = RecordingDelayedRunner()
+        listener = RecordingPurchasesUpdatedListener()
         wrapper = BillingWrapper(
             clientFactory = fixture.clientFactory,
             mainHandler = Handler(Looper.getMainLooper()),
+            deviceCache = DeviceCache(ApplicationProvider.getApplicationContext<Context>(), FakeHTTPClient.TEST_API_KEY),
+            diagnostics = NoOpDiagnosticsTracker,
             backgroundRunner = runner,
         )
         // 待办队列的守卫要求先挂 listener（否则直接回错误），先满足前提。
-        wrapper.purchasesUpdatedListener = BillingWrapper.BillingPurchasesUpdatedListener { }
+        wrapper.purchasesUpdatedListener = listener
     }
 
     private fun idleMain() = shadowOf(Looper.getMainLooper()).idle()
@@ -173,6 +187,8 @@ class BillingWrapperTest {
         val bare = BillingWrapper(
             clientFactory = fixture.clientFactory,
             mainHandler = Handler(Looper.getMainLooper()),
+            deviceCache = DeviceCache(ApplicationProvider.getApplicationContext<Context>(), FakeHTTPClient.TEST_API_KEY),
+            diagnostics = NoOpDiagnosticsTracker,
             backgroundRunner = runner,
         )
         var error: PurchasesError? = null
@@ -242,26 +258,150 @@ class BillingWrapperTest {
     // region onPurchasesUpdated 边界
 
     @Test
-    fun `OK 加 null purchases 不会崩也不会通知 listener（坑 17）`() {
-        var notified = false
-        wrapper.purchasesUpdatedListener = BillingWrapper.BillingPurchasesUpdatedListener { notified = true }
-
+    fun `OK 加 null purchases 不会崩也不会通知成功（坑 17：按 ERROR 处理）`() {
         wrapper.onPurchasesUpdated(FakeBillingClientFixture.ok(), null)
 
-        assertThat(notified).isFalse()
+        assertThat(listener.updates).isEmpty()
+        assertThat(listener.failures).hasSize(1)
+        assertThat(listener.failures.single().first.code).isEqualTo(PurchasesErrorCode.StoreProblemError)
+        assertThat(listener.failures.single().second).isFalse()
     }
 
     @Test
-    fun `失败的购买更新不通知 listener`() {
-        var notified = false
-        wrapper.purchasesUpdatedListener = BillingWrapper.BillingPurchasesUpdatedListener { notified = true }
-
+    fun `USER_CANCELED 回一次失败并带 userCancelled 标志`() {
         wrapper.onPurchasesUpdated(billingResult(BillingClient.BillingResponseCode.USER_CANCELED), mutableListOf())
 
-        assertThat(notified).isFalse()
+        assertThat(listener.updates).isEmpty()
+        assertThat(listener.failures).hasSize(1)
+        assertThat(listener.failures.single().first.code).isEqualTo(PurchasesErrorCode.PurchaseCancelledError)
+        assertThat(listener.failures.single().second).isTrue()
+    }
+
+    @Test
+    fun `OK 加空列表既不回调成功也不回调失败`() {
+        wrapper.onPurchasesUpdated(FakeBillingClientFixture.ok(), mutableListOf())
+
+        assertThat(listener.updates).isEmpty()
+        assertThat(listener.failures).isEmpty()
     }
 
     // endregion
+
+    // region onPurchasesUpdated 的补齐（决策 D + 坑 18）
+
+    @Test
+    fun `有购买上下文时交易被补齐类型、offering 与升降级模式`() {
+        connect()
+        val pending = pendingPurchase(
+            productId = "sub_premium",
+            offeringIdentifier = "default",
+            replacementMode = ReplacementMode.CHARGE_PRORATED_PRICE,
+        )
+        wrapper.purchaseContextProvider = { productId -> if (productId == "sub_premium") pending else null }
+
+        wrapper.onPurchasesUpdated(
+            FakeBillingClientFixture.ok(),
+            mutableListOf(purchaseFixture(productIds = listOf("sub_premium"))),
+        )
+        idleMain()
+
+        val transaction = listener.allTransactions.single()
+        assertThat(transaction.type).isEqualTo(ProductType.SUBS)
+        assertThat(transaction.subscriptionOptionId).isEqualTo("monthly-base")
+        assertThat(transaction.presentedOfferingIdentifier).isEqualTo("default")
+        assertThat(transaction.replacementMode).isEqualTo(ReplacementMode.CHARGE_PRORATED_PRICE)
+        // 一次都没反查 —— 上下文在就不该多打两次 queryPurchases。
+        assertThat(fixture.queryPurchasesCallCount).isZero()
+    }
+
+    @Test
+    fun `坑 18 —— 应用外购买没有上下文，靠两次 queryPurchases 反查类型`() {
+        connect()
+        fixture.stubQueryPurchases()
+        val purchase = purchaseFixture(productIds = listOf("coins_100"), purchaseToken = "token-outside")
+        // 第一项 = SUBS 的答复（空），第二项 = INAPP 的答复（命中）。
+        fixture.queryPurchasesResponses.addLast(emptyList())
+        fixture.queryPurchasesResponses.addLast(listOf(purchase))
+
+        wrapper.onPurchasesUpdated(FakeBillingClientFixture.ok(), mutableListOf(purchase))
+        idleMain()
+
+        assertThat(listener.allTransactions.single().type).isEqualTo(ProductType.INAPP)
+        assertThat(listener.allTransactions.single().presentedOfferingIdentifier).isNull()
+        assertThat(fixture.queryPurchasesCallCount).isEqualTo(2)
+    }
+
+    @Test
+    fun `反查两次都没命中 —— 类型落 UNKNOWN（七分支会整笔跳过）`() {
+        connect()
+        fixture.stubQueryPurchases()
+        val purchase = purchaseFixture(productIds = listOf("ghost"), purchaseToken = "token-ghost")
+
+        wrapper.onPurchasesUpdated(FakeBillingClientFixture.ok(), mutableListOf(purchase))
+        idleMain()
+
+        assertThat(listener.allTransactions.single().type).isEqualTo(ProductType.UNKNOWN)
+    }
+
+    @Test
+    fun `一批多笔购买要凑齐才回调一次`() {
+        connect()
+        val subs = pendingPurchase("sub_premium")
+        val coins = pendingPurchase("coins_100", productType = ProductType.INAPP, subscriptionOptionId = null)
+        wrapper.purchaseContextProvider = { productId ->
+            when (productId) {
+                "sub_premium" -> subs
+                "coins_100" -> coins
+                else -> null
+            }
+        }
+
+        wrapper.onPurchasesUpdated(
+            FakeBillingClientFixture.ok(),
+            mutableListOf(
+                purchaseFixture(productIds = listOf("sub_premium"), purchaseToken = "t1"),
+                purchaseFixture(productIds = listOf("coins_100"), purchaseToken = "t2"),
+            ),
+        )
+        idleMain()
+
+        assertThat(listener.updates).hasSize(1)
+        assertThat(listener.allTransactions.map { it.purchaseToken }).containsExactly("t1", "t2")
+    }
+
+    @Test
+    fun `isFeatureSupported 在未连接时返回 null（判定不了，不拦购买）`() {
+        assertThat(wrapper.isFeatureSupported(BillingClient.FeatureType.SUBSCRIPTIONS_UPDATE)).isNull()
+    }
+
+    // endregion
+
+    private fun connect() {
+        buildClient(ready = true)
+        wrapper.onBillingSetupFinished(FakeBillingClientFixture.ok())
+        idleMain()
+    }
+
+    private fun pendingPurchase(
+        productId: String,
+        productType: ProductType = ProductType.SUBS,
+        subscriptionOptionId: String? = "monthly-base",
+        offeringIdentifier: String? = null,
+        replacementMode: ReplacementMode? = null,
+    ) = PendingPurchase(
+        key = productId,
+        productType = productType,
+        subscriptionOptionId = subscriptionOptionId,
+        presentedPackageIdentifier = null,
+        receiptInfo = ReceiptInfo(
+            productIds = listOf(productId),
+            platformProductIds = listOf(PlatformProductId(productId)),
+            presentedOfferingIdentifier = offeringIdentifier,
+            replacementMode = replacementMode,
+        ),
+        startedAtMs = 1L,
+        state = PendingPurchase.STATE_LAUNCHED,
+    )
 
     /**
      * 真实链路里 `billingClient` 是在 `performStartConnection()` 里建出来的

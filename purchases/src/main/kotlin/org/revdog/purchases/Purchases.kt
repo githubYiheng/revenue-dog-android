@@ -15,8 +15,8 @@ import org.revdog.purchases.offerings.Offerings
  * | `…With { }` lambda | Kotlin 非协程 | `ListenerConversions.kt` |
  * | `await…` 挂起函数 | Kotlin 协程 | `CoroutinesExtensions.kt` |
  *
- * M1 只装：configure / 身份 / CustomerInfo / offerings。
- * 购买、恢复、属性在 M2–M3 追加（公开面**只进不出**，追加 = 次版本号）。
+ * 已装：configure / 身份 / CustomerInfo / offerings / 购买 / 恢复 / 同步。
+ * 属性同步在 M3 追加（公开面**只进不出**，追加 = 次版本号）。
  */
 public class Purchases private constructor(
     private val orchestrator: PurchasesOrchestrator,
@@ -122,7 +122,52 @@ public class Purchases private constructor(
 
     // endregion
 
-    /** 前后台状态。M2 接进程生命周期后自动维护。 */
+    // region 购买与恢复
+
+    /**
+     * 发起购买。
+     *
+     * ```kotlin
+     * Purchases.sharedInstance.purchase(
+     *     PurchaseParams.Builder(activity, offerings.current!!.monthly!!).build(),
+     *     callback,
+     * )
+     * ```
+     *
+     * 链路（设计 §3）：**先落盘购买上下文 → 主线程 `launchBillingFlow` → 等 Play 回调 →
+     * `POST /v1/receipts` → 按后端下发的 `should_consume` 完成交易 → 回调**。
+     *
+     * 三件宿主必须知道的事：
+     * 1. [PurchaseResult.isPending] 为 `true` 时**钱还没扣**：既不要发权益，也不要提示失败；
+     * 2. 错误码 901 `purchasePendingServerConfirmation` = **钱扣了、后端还没确认**，
+     *    SDK 会自动重放，**绝不要引导用户重买**；
+     * 3. 错误码 902 `purchaseRejectedByServer` = 钱扣了但后端确定性拒绝，走客服 / 退款。
+     */
+    public fun purchase(purchaseParams: PurchaseParams, callback: PurchaseCallback) {
+        orchestrator.purchase(purchaseParams, callback)
+    }
+
+    /**
+     * 恢复购买：把 Play 上当前可见的交易重新上报到后端（`initiation_source=restore`）。
+     *
+     * **尽力而为**：Play Billing 8 起已经没有「购买历史」API，端上只能看到
+     * **活跃订阅 + 未消耗的一次性商品**。完整历史的权威在后端。
+     */
+    public fun restorePurchases(callback: ReceiveCustomerInfoCallback) {
+        orchestrator.restorePurchases(callback)
+    }
+
+    /**
+     * 同步购买：只上报，**绝不** ack / consume（`initiation_source=unsynced_active_purchases`）。
+     * 宿主自管交易完成（`purchasesCompletedBy = my_app`）时用它。
+     */
+    public fun syncPurchases(callback: ReceiveCustomerInfoCallback) {
+        orchestrator.syncPurchases(callback)
+    }
+
+    // endregion
+
+    /** 前后台状态。SDK 已自动跟随进程生命周期，这里留给宿主 / 测试显式覆盖。 */
     public fun setAppBackgrounded(backgrounded: Boolean) {
         orchestrator.setAppBackgrounded(backgrounded)
     }

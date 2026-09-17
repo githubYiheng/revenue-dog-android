@@ -2,6 +2,7 @@
 
 package org.revdog.apitester
 
+import android.app.Activity
 import android.content.Context
 import kotlinx.coroutines.flow.Flow
 import org.revdog.purchases.CacheFetchPolicy
@@ -11,6 +12,9 @@ import org.revdog.purchases.LogLevel
 import org.revdog.purchases.OwnershipType
 import org.revdog.purchases.PeriodType
 import org.revdog.purchases.ProductType
+import org.revdog.purchases.PurchaseCallback
+import org.revdog.purchases.PurchaseParams
+import org.revdog.purchases.PurchaseResult
 import org.revdog.purchases.Purchases
 import org.revdog.purchases.PurchasesAreCompletedBy
 import org.revdog.purchases.PurchasesConfiguration
@@ -19,6 +23,7 @@ import org.revdog.purchases.PurchasesErrorCode
 import org.revdog.purchases.PurchasesException
 import org.revdog.purchases.ReceiveCustomerInfoCallback
 import org.revdog.purchases.ReceiveOfferingsCallback
+import org.revdog.purchases.ReplacementMode
 import org.revdog.purchases.Store
 import org.revdog.purchases.UncheckedPurchasesException
 import org.revdog.purchases.UpdatedCustomerInfoListener
@@ -26,6 +31,9 @@ import org.revdog.purchases.awaitCustomerInfo
 import org.revdog.purchases.awaitLogIn
 import org.revdog.purchases.awaitLogOut
 import org.revdog.purchases.awaitOfferings
+import org.revdog.purchases.awaitPurchase
+import org.revdog.purchases.awaitRestore
+import org.revdog.purchases.awaitSyncPurchases
 import org.revdog.purchases.customerinfo.CustomerInfo
 import org.revdog.purchases.customerinfo.EntitlementInfo
 import org.revdog.purchases.customerinfo.EntitlementInfos
@@ -35,6 +43,11 @@ import org.revdog.purchases.getCustomerInfoWith
 import org.revdog.purchases.getOfferingsWith
 import org.revdog.purchases.logInWith
 import org.revdog.purchases.logOutWith
+import org.revdog.purchases.models.PurchaseState
+import org.revdog.purchases.models.StoreTransaction
+import org.revdog.purchases.purchaseWith
+import org.revdog.purchases.restorePurchasesWith
+import org.revdog.purchases.syncPurchasesWith
 import org.revdog.purchases.models.Period
 import org.revdog.purchases.models.Price
 import org.revdog.purchases.models.PricingPhase
@@ -341,5 +354,100 @@ internal object KotlinPurchasesAPI {
         val loggedInInfo: CustomerInfo = logInResult.customerInfo
         val created: Boolean = logInResult.created
         val loggedOut: CustomerInfo = purchases.awaitLogOut()
+    }
+
+    suspend fun checkPurchaseCoroutines(purchases: Purchases, params: PurchaseParams) {
+        val result: PurchaseResult = purchases.awaitPurchase(params)
+        val restored: CustomerInfo = purchases.awaitRestore()
+        val synced: CustomerInfo = purchases.awaitSyncPurchases()
+    }
+
+    fun checkPurchaseParams(activity: Activity, packageToPurchase: Package, product: StoreProduct) {
+        val fromPackage: PurchaseParams = PurchaseParams.Builder(activity, packageToPurchase).build()
+        val fromProduct: PurchaseParams = PurchaseParams.Builder(activity, product).build()
+        val option: SubscriptionOption? = product.defaultOption
+        if (option != null) {
+            val fromOption: PurchaseParams = PurchaseParams.Builder(activity, option).build()
+        }
+        val upgrade: PurchaseParams = PurchaseParams.Builder(activity, product)
+            .oldProductId("sub_basic")
+            .replacementMode(ReplacementMode.CHARGE_PRORATED_PRICE)
+            .isPersonalizedPrice(true)
+            .build()
+        val oldProductId: String? = upgrade.oldProductId
+        val replacementMode: ReplacementMode? = upgrade.replacementMode
+        val personalized: Boolean? = upgrade.isPersonalizedPrice
+    }
+
+    fun checkReplacementMode() {
+        val modes: List<ReplacementMode> = ReplacementMode.ALL
+        val all = arrayOf(
+            ReplacementMode.WITHOUT_PRORATION,
+            ReplacementMode.WITH_TIME_PRORATION,
+            ReplacementMode.CHARGE_FULL_PRICE,
+            ReplacementMode.CHARGE_PRORATED_PRICE,
+            ReplacementMode.DEFERRED,
+        )
+        val name: String = ReplacementMode.DEFERRED.name
+        val wireName: String = ReplacementMode.DEFERRED.wireName
+        val parsed: ReplacementMode? = ReplacementMode.fromWireName("DEFERRED")
+    }
+
+    fun checkPurchase(purchases: Purchases, params: PurchaseParams) {
+        purchases.purchase(
+            params,
+            object : PurchaseCallback {
+                override fun onCompleted(result: PurchaseResult) = Unit
+                override fun onError(error: PurchasesError, userCancelled: Boolean) = Unit
+            },
+        )
+        purchases.purchaseWith(params) { result -> checkPurchaseResult(result) }
+        purchases.purchaseWith(params, onError = { _, _ -> }) { }
+
+        purchases.restorePurchases(
+            object : ReceiveCustomerInfoCallback {
+                override fun onReceived(customerInfo: CustomerInfo) = Unit
+                override fun onError(error: PurchasesError) = Unit
+            },
+        )
+        purchases.restorePurchasesWith { }
+        purchases.restorePurchasesWith(onError = { }) { }
+
+        purchases.syncPurchases(
+            object : ReceiveCustomerInfoCallback {
+                override fun onReceived(customerInfo: CustomerInfo) = Unit
+                override fun onError(error: PurchasesError) = Unit
+            },
+        )
+        purchases.syncPurchasesWith { }
+        purchases.syncPurchasesWith(onError = { }) { }
+    }
+
+    fun checkPurchaseResult(result: PurchaseResult) {
+        val customerInfo: CustomerInfo = result.customerInfo
+        val transaction: StoreTransaction? = result.storeTransaction
+        val isPending: Boolean = result.isPending
+        if (transaction != null) checkStoreTransaction(transaction)
+    }
+
+    fun checkStoreTransaction(transaction: StoreTransaction) {
+        val orderId: String? = transaction.orderId
+        val productIds: List<String> = transaction.productIds
+        val type: ProductType = transaction.type
+        val purchaseTime: Long = transaction.purchaseTime
+        val purchaseToken: String = transaction.purchaseToken
+        val state: PurchaseState = transaction.purchaseState
+        val isAutoRenewing: Boolean? = transaction.isAutoRenewing
+        val isAcknowledged: Boolean = transaction.isAcknowledged
+        val offering: String? = transaction.presentedOfferingIdentifier
+        val optionId: String? = transaction.subscriptionOptionId
+        val replacementMode: ReplacementMode? = transaction.replacementMode
+    }
+
+    fun checkPurchaseState() {
+        val states: List<PurchaseState> = PurchaseState.ALL
+        val all = arrayOf(PurchaseState.UNSPECIFIED_STATE, PurchaseState.PURCHASED, PurchaseState.PENDING)
+        val raw: String = PurchaseState.PURCHASED.rawValue
+        val parsed: PurchaseState = PurchaseState.fromPlayCode(1)
     }
 }
