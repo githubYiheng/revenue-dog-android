@@ -9,6 +9,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.revdog.purchases.caching.DeviceCache
+import org.revdog.purchases.common.DeliveryOrigin
 import org.revdog.purchases.common.MainDispatcher
 import org.revdog.purchases.google.BillingWrapper
 import org.revdog.purchases.google.usecase.QueryProductDetailsResponse
@@ -76,14 +77,21 @@ class OfferingsManagerTest {
         }
     }
 
+    /** 最后一次交付的来源（M4：`offerings_fetch.cache_hit` 的判定源）。 */
+    private var lastOrigin: DeliveryOrigin? = null
+
     private fun fetch(fetchCurrent: Boolean = false): Offerings? {
         var result: Offerings? = null
+        lastOrigin = null
         manager.getOfferings(
             appUserID = "user-42",
             appInBackground = false,
             fetchCurrent = fetchCurrent,
             onError = { throw AssertionError("不该失败：$it") },
-            onSuccess = { result = it },
+            onSuccess = { offerings, origin ->
+                result = offerings
+                lastOrigin = origin
+            },
         )
         return result
     }
@@ -140,11 +148,15 @@ class OfferingsManagerTest {
         httpClient.enqueue(200, Fixtures.OFFERINGS_RESPONSE)
         fetch()
         val afterFirst = httpClient.recordedRequests.size
+        assertThat(lastOrigin).isEqualTo(DeliveryOrigin.NETWORK)
 
         fetch()
 
         assertThat(httpClient.recordedRequests.size).isEqualTo(afterFirst)
         assertThat(manager.cachedOfferings).isNotNull
+        // M4：来源下沉到 Manager 层，编排层才发得出 `offerings_fetch.cache_hit`。
+        assertThat(lastOrigin).isEqualTo(DeliveryOrigin.CACHE)
+        assertThat(lastOrigin?.cacheHit).isTrue
     }
 
     @Test
@@ -169,6 +181,9 @@ class OfferingsManagerTest {
         val offerings = requireNotNull(fetch())
 
         assertThat(offerings.current?.availablePackages).isNotEmpty
+        // 回落缓存与正常命中缓存在排障时是两件事：前者说明此刻付费墙上的价格可能已经过期。
+        assertThat(lastOrigin).isEqualTo(DeliveryOrigin.STALE_FALLBACK)
+        assertThat(lastOrigin?.cacheHit).isTrue
     }
 
     @Test
@@ -180,7 +195,7 @@ class OfferingsManagerTest {
             appUserID = "user-42",
             appInBackground = false,
             onError = { error = it },
-            onSuccess = { throw AssertionError("不该成功") },
+            onSuccess = { _, _ -> throw AssertionError("不该成功") },
         )
 
         assertThat(error?.code).isEqualTo(PurchasesErrorCode.UnknownBackendError)

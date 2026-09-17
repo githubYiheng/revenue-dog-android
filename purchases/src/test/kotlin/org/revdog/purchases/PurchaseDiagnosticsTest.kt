@@ -7,6 +7,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.revdog.purchases.diagnostics.DiagnosticsTracker
+import org.revdog.purchases.diagnostics.DiagnosticsWarningCode
 import org.revdog.purchases.google.toStoreTransaction
 import org.revdog.purchases.support.BillingHarness
 import org.revdog.purchases.support.Fixtures
@@ -109,7 +110,7 @@ class PurchaseDiagnosticsTest {
     }
 
     @Test
-    fun `M2 的事件名全集都在 DiagnosticsTracker 的常量里（M3 换实现不改名）`() {
+    fun `M2 的事件名全集都在 DiagnosticsTracker 的常量里（restore 与 sync 在 M4 与 iOS 对名）`() {
         assertThat(
             listOf(
                 DiagnosticsTracker.EVENT_PURCHASE_STARTED,
@@ -118,8 +119,8 @@ class PurchaseDiagnosticsTest {
                 DiagnosticsTracker.EVENT_CONSUME_DECISION,
                 DiagnosticsTracker.EVENT_PURCHASE_PENDING,
                 DiagnosticsTracker.EVENT_BILLING_PURCHASE_UPDATE,
-                DiagnosticsTracker.EVENT_RESTORE_PURCHASES,
-                DiagnosticsTracker.EVENT_SYNC_PURCHASES,
+                DiagnosticsTracker.EVENT_RESTORE,
+                DiagnosticsTracker.EVENT_SYNC,
             ),
         ).containsExactly(
             "purchase_started",
@@ -128,8 +129,8 @@ class PurchaseDiagnosticsTest {
             "consume_decision",
             "purchase_pending",
             "billing_purchase_update",
-            "restore_purchases",
-            "sync_purchases",
+            "restore",
+            "sync",
         )
     }
 
@@ -179,7 +180,7 @@ class PurchaseDiagnosticsTest {
                 override fun onError(error: PurchasesError) = Unit
             },
         )
-        val restore = harness.diagnostics.named(DiagnosticsTracker.EVENT_RESTORE_PURCHASES)
+        val restore = harness.diagnostics.named(DiagnosticsTracker.EVENT_RESTORE)
         assertThat(restore.map { it["outcome"] })
             .containsExactly("started", DiagnosticsTracker.OUTCOME_FAILED)
         assertThat(restore.last()["error_code"]).isEqualTo(PurchasesErrorCode.StoreProblemError.name)
@@ -191,9 +192,64 @@ class PurchaseDiagnosticsTest {
                 override fun onError(error: PurchasesError) = Unit
             },
         )
-        assertThat(harness.diagnostics.named(DiagnosticsTracker.EVENT_SYNC_PURCHASES).map { it["outcome"] })
+        assertThat(harness.diagnostics.named(DiagnosticsTracker.EVENT_SYNC).map { it["outcome"] })
             .containsExactly("started", DiagnosticsTracker.OUTCOME_FAILED)
     }
+
+    // region M4：`cache_hit`（契约 §1.3，下沉到 Manager 层）
+
+    private fun receiveCustomerInfo() = object : ReceiveCustomerInfoCallback {
+        override fun onReceived(customerInfo: org.revdog.purchases.customerinfo.CustomerInfo) = Unit
+        override fun onError(error: PurchasesError) = Unit
+    }
+
+    private fun receiveOfferings() = object : ReceiveOfferingsCallback {
+        override fun onReceived(offerings: org.revdog.purchases.offerings.Offerings) = Unit
+        override fun onError(error: PurchasesError) = Unit
+    }
+
+    @Test
+    fun `customer_info_fetch 带 cache_hit —— 联网为 false、命中缓存为 true`() {
+        harness.httpClient.enqueue(200, Fixtures.SUBSCRIBER_RESPONSE)
+        harness.orchestrator.getCustomerInfo(CacheFetchPolicy.FETCH_CURRENT, receiveCustomerInfo())
+
+        harness.orchestrator.getCustomerInfo(CacheFetchPolicy.CACHE_ONLY, receiveCustomerInfo())
+
+        val events = harness.diagnostics.named(DiagnosticsTracker.EVENT_CUSTOMER_INFO_FETCH)
+        assertThat(events.map { it["cache_hit"] }).containsExactly(false, true)
+    }
+
+    @Test
+    fun `customer_info_fetch 失败时不发 cache_hit —— 没交付就谈不上命中`() {
+        harness.httpClient.enqueue(500, """{"message":"boom"}""")
+        harness.orchestrator.getCustomerInfo(CacheFetchPolicy.FETCH_CURRENT, receiveCustomerInfo())
+
+        val fetch = harness.diagnostics.named(DiagnosticsTracker.EVENT_CUSTOMER_INFO_FETCH).single()
+        assertThat(fetch["cache_hit"]).isNull()
+        assertThat(fetch["status"]).isEqualTo(500)
+    }
+
+    @Test
+    fun `offerings_fetch 带 cache_hit，且回落磁盘缓存时多记一条 sdk_warning`() {
+        harness.httpClient.enqueue(200, Fixtures.OFFERINGS_RESPONSE)
+        harness.orchestrator.getOfferings(receiveOfferings())
+
+        // 第二次命中内存缓存。
+        harness.orchestrator.getOfferings(receiveOfferings())
+
+        // 清掉内存缓存 + 后端 5xx → 回落磁盘上的原始响应（stale）。
+        harness.deviceCache.clearOfferingsMemoryCache()
+        harness.httpClient.enqueue(500, """{"message":"boom"}""")
+        harness.orchestrator.getOfferings(receiveOfferings())
+
+        val events = harness.diagnostics.named(DiagnosticsTracker.EVENT_OFFERINGS_FETCH)
+        assertThat(events.map { it["cache_hit"] }).containsExactly(false, true, true)
+        assertThat(
+            harness.diagnostics.named(DiagnosticsTracker.EVENT_SDK_WARNING).map { it["code"] },
+        ).containsExactly(DiagnosticsWarningCode.OFFERINGS_CACHE_FALLBACK)
+    }
+
+    // endregion
 
     @Test
     fun `诊断字段里不出现 purchaseToken 原文`() {

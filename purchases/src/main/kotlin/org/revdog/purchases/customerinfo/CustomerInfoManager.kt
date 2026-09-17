@@ -9,6 +9,7 @@ import org.revdog.purchases.caching.DeviceCache
 import org.revdog.purchases.common.CacheDurations
 import org.revdog.purchases.common.DateProvider
 import org.revdog.purchases.common.DefaultDateProvider
+import org.revdog.purchases.common.DeliveryOrigin
 import org.revdog.purchases.common.MainDispatcher
 import org.revdog.purchases.identity.IdentityManager
 import org.revdog.purchases.networking.Backend
@@ -93,11 +94,15 @@ internal class CustomerInfoManager(
     private val dateProvider: DateProvider = DefaultDateProvider(),
 ) {
 
+    /**
+     * @param onSuccess 第二个参数是这份 CustomerInfo 的**来源**（M4 新增，
+     * `customer_info_fetch.cache_hit` 由它推导 —— 只有这一层分得清）。
+     */
     fun getCustomerInfo(
         appUserID: String,
         fetchPolicy: CacheFetchPolicy,
         appInBackground: Boolean,
-        onSuccess: (CustomerInfo) -> Unit,
+        onSuccess: (CustomerInfo, DeliveryOrigin) -> Unit,
         onError: (PurchasesError) -> Unit,
     ) {
         Logger.debug { "获取 CustomerInfo（policy=$fetchPolicy）" }
@@ -121,13 +126,13 @@ internal class CustomerInfoManager(
 
     private fun getCacheOnly(
         appUserID: String,
-        onSuccess: (CustomerInfo) -> Unit,
+        onSuccess: (CustomerInfo, DeliveryOrigin) -> Unit,
         onError: (PurchasesError) -> Unit,
     ) {
         val cached = deviceCache.getCachedCustomerInfo(appUserID)
         mainDispatcher.dispatch {
             if (cached != null) {
-                onSuccess(cached)
+                onSuccess(cached, DeliveryOrigin.CACHE)
             } else {
                 onError(PurchasesError(PurchasesErrorCode.CustomerInfoError, "缓存中没有 CustomerInfo"))
             }
@@ -137,7 +142,7 @@ internal class CustomerInfoManager(
     private fun getCachedOrFetched(
         appUserID: String,
         appInBackground: Boolean,
-        onSuccess: (CustomerInfo) -> Unit,
+        onSuccess: (CustomerInfo, DeliveryOrigin) -> Unit,
         onError: (PurchasesError) -> Unit,
     ) {
         val cached = deviceCache.getCachedCustomerInfo(appUserID)
@@ -145,22 +150,22 @@ internal class CustomerInfoManager(
             fetchAndCache(appUserID, appInBackground, onSuccess, onError)
             return
         }
-        mainDispatcher.dispatch { onSuccess(cached) }
+        mainDispatcher.dispatch { onSuccess(cached, DeliveryOrigin.CACHE) }
         if (isStale(appUserID, appInBackground)) {
             Logger.debug { "CustomerInfo 缓存已过期，后台刷新" }
-            fetchAndCache(appUserID, appInBackground, onSuccess = {}, onError = {})
+            fetchAndCache(appUserID, appInBackground, onSuccess = { _, _ -> }, onError = {})
         }
     }
 
     private fun getNotStaleCachedOrCurrent(
         appUserID: String,
         appInBackground: Boolean,
-        onSuccess: (CustomerInfo) -> Unit,
+        onSuccess: (CustomerInfo, DeliveryOrigin) -> Unit,
         onError: (PurchasesError) -> Unit,
     ) {
         val cached = deviceCache.getCachedCustomerInfo(appUserID)
         if (cached != null && !isStale(appUserID, appInBackground)) {
-            mainDispatcher.dispatch { onSuccess(cached) }
+            mainDispatcher.dispatch { onSuccess(cached, DeliveryOrigin.CACHE) }
             return
         }
         fetchAndCache(appUserID, appInBackground, onSuccess, onError)
@@ -169,7 +174,7 @@ internal class CustomerInfoManager(
     private fun fetchAndCache(
         appUserID: String,
         appInBackground: Boolean,
-        onSuccess: (CustomerInfo) -> Unit,
+        onSuccess: (CustomerInfo, DeliveryOrigin) -> Unit,
         onError: (PurchasesError) -> Unit,
     ) {
         // 反直觉但必须（对照 RC `getCustomerInfoFetchOnly`）：**先把时间戳设成现在再发请求**，
@@ -180,7 +185,7 @@ internal class CustomerInfoManager(
             appInBackground = appInBackground,
             onSuccess = { customerInfo ->
                 updateHandler.cacheAndNotifyListeners(customerInfo, appUserID)
-                mainDispatcher.dispatch { onSuccess(customerInfo) }
+                mainDispatcher.dispatch { onSuccess(customerInfo, DeliveryOrigin.NETWORK) }
             },
             onError = { error, isServerError ->
                 deviceCache.clearCustomerInfoCacheTimestamp(appUserID)
@@ -189,7 +194,7 @@ internal class CustomerInfoManager(
                 mainDispatcher.dispatch {
                     if (cached != null) {
                         Logger.warn { "后端 5xx，供给过期缓存：$error" }
-                        onSuccess(cached)
+                        onSuccess(cached, DeliveryOrigin.STALE_FALLBACK)
                     } else {
                         onError(error)
                     }

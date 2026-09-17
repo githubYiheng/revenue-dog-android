@@ -95,3 +95,30 @@ internal fun interface DateProvider {
 internal class DefaultDateProvider : DateProvider {
     override fun now(): Date = Date()
 }
+
+/**
+ * 一次 CustomerInfo / offerings 交付的**来源**。
+ *
+ * M4 新增：`customer_info_fetch.cache_hit` / `offerings_fetch.cache_hit`（契约 §1.3）只有 Manager
+ * 层知道 —— 缓存命中时根本没有发过请求，编排层看到的只是一个成功回调，分辨不出来。
+ * M3 期间因此少发了这个字段（`PurchasesOrchestrator.trackFetch` 的「待核实 / M4 补」）；
+ * 现在由两个 Manager 在交付时一并带上来源，编排层只做翻译。
+ *
+ * 三态而不是一个 Boolean：**「后端挂了回落缓存」与「正常命中缓存」在排障时完全是两件事** ——
+ * 前者说明这台设备此刻拿到的是过期数据（offerings 会额外记一条
+ * `sdk_warning{offerings_cache_fallback}`），后者只是省了一次请求。
+ */
+internal enum class DeliveryOrigin {
+    /** 本次是真的打了后端并成功。 */
+    NETWORK,
+
+    /** 命中未过期（或过期但按策略先交付）的缓存。 */
+    CACHE,
+
+    /** 后端失败，回落到盘上/内存里的旧数据（stale）。 */
+    STALE_FALLBACK,
+    ;
+
+    /** 契约 §1.3 的 `cache_hit`：只要不是刚从网络拿的，就算命中缓存。 */
+    val cacheHit: Boolean get() = this != NETWORK
+}

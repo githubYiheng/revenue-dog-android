@@ -21,6 +21,7 @@ import org.revdog.purchases.caching.PendingPurchaseStore
 import org.revdog.purchases.common.AppConfig
 import org.revdog.purchases.common.DateProvider
 import org.revdog.purchases.common.DefaultDateProvider
+import org.revdog.purchases.common.DeliveryOrigin
 import org.revdog.purchases.common.Dispatcher
 import org.revdog.purchases.common.MainDispatcher
 import org.revdog.purchases.customerinfo.CustomerInfo
@@ -31,6 +32,7 @@ import org.revdog.purchases.diagnostics.DiagnosticsRecorder
 import org.revdog.purchases.diagnostics.DiagnosticsSettings
 import org.revdog.purchases.diagnostics.DiagnosticsTracker
 import org.revdog.purchases.diagnostics.DiagnosticsUploader
+import org.revdog.purchases.diagnostics.DiagnosticsWarningCode
 import org.revdog.purchases.diagnostics.HandlerDiagnosticsScheduler
 import org.revdog.purchases.google.BillingWrapper
 import org.revdog.purchases.google.ReplaceProductInfo
@@ -205,7 +207,7 @@ internal class PurchasesOrchestrator(
                     appInBackground = appConfig.isAppBackgrounded,
                     fetchCurrent = true,
                     onError = { Logger.warn { "logIn 后刷新 offerings 失败：$it" } },
-                    onSuccess = { },
+                    onSuccess = { _, _ -> },
                 )
                 diagnostics.track(
                     DiagnosticsTracker.EVENT_IDENTITY_LOGIN,
@@ -285,12 +287,24 @@ internal class PurchasesOrchestrator(
             appUserID = appUserID,
             fetchPolicy = fetchPolicy,
             appInBackground = appConfig.isAppBackgrounded,
-            onSuccess = {
-                trackFetch(DiagnosticsTracker.EVENT_CUSTOMER_INFO_FETCH, startedAtMs, fetchPolicy.rawValue, null)
-                callback.onReceived(it)
+            onSuccess = { customerInfo, origin ->
+                trackFetch(
+                    event = DiagnosticsTracker.EVENT_CUSTOMER_INFO_FETCH,
+                    startedAtMs = startedAtMs,
+                    policy = fetchPolicy.rawValue,
+                    origin = origin,
+                    error = null,
+                )
+                callback.onReceived(customerInfo)
             },
             onError = { error ->
-                trackFetch(DiagnosticsTracker.EVENT_CUSTOMER_INFO_FETCH, startedAtMs, fetchPolicy.rawValue, error)
+                trackFetch(
+                    event = DiagnosticsTracker.EVENT_CUSTOMER_INFO_FETCH,
+                    startedAtMs = startedAtMs,
+                    policy = fetchPolicy.rawValue,
+                    origin = null,
+                    error = error,
+                )
                 callback.onError(error)
             },
         )
@@ -299,16 +313,26 @@ internal class PurchasesOrchestrator(
     /**
      * 公开 callback 的诊断收口（契约 §1.3 的 `customer_info_fetch` / `offerings_fetch`）。
      *
-     * 字段比 iOS 少两个：`cache_hit` 与 `status` / `request_id`。理由：这两条路上
-     * 「是否命中缓存」与「HTTP 状态」都在各自 Manager 内部（缓存命中时根本没有请求），
-     * 在编排层拿不到，而把 Manager 的构造签名改成带 tracker 会连带改掉一批 M1/M2 的装配点。
-     * **待核实 / M4 补**：把 `cache_hit` / `status` / `request_id` 下沉到 Manager 层。
+     * `cache_hit`（M4 补齐）由 Manager 交付时给出的 [DeliveryOrigin] 推导 —— 缓存命中时
+     * 根本没有请求，只有 Manager 分得清（M3 期间这个字段因此缺着）。失败时为 `null`（没交付，
+     * 谈不上命中与否），**不填 false**：否则「后端挂了而且缓存也空」会与「网络成功」混在一条查询里。
+     *
+     * 成功路径仍然没有 `status` / `request_id`：那要把 `HTTPResult` 从 `Backend` 一路穿到
+     * Manager 的成功回调上，而成功的 `status` 恒为 200、`request_id` 只在排障失败时有用
+     * （失败路径已经带了两者）。这是有意不做，不是遗漏。
      */
-    private fun trackFetch(event: String, startedAtMs: Long, policy: String?, error: PurchasesError?) {
+    private fun trackFetch(
+        event: String,
+        startedAtMs: Long,
+        policy: String?,
+        origin: DeliveryOrigin?,
+        error: PurchasesError?,
+    ) {
         diagnostics.track(
             event,
             mapOf(
                 "policy" to policy,
+                "cache_hit" to origin?.cacheHit,
                 "duration_ms" to (dateProvider.now().time - startedAtMs),
                 "error_code" to error?.code?.name,
                 "status" to error?.httpStatusCode,
@@ -331,18 +355,33 @@ internal class PurchasesOrchestrator(
             appUserID = appUserID,
             appInBackground = appConfig.isAppBackgrounded,
             onError = { error ->
-                trackFetch(DiagnosticsTracker.EVENT_OFFERINGS_FETCH, startedAtMs, null, error)
+                trackFetch(
+                    event = DiagnosticsTracker.EVENT_OFFERINGS_FETCH,
+                    startedAtMs = startedAtMs,
+                    policy = null,
+                    origin = null,
+                    error = error,
+                )
                 callback.onError(error)
             },
-            onSuccess = { offerings ->
+            onSuccess = { offerings, origin ->
                 diagnostics.track(
                     DiagnosticsTracker.EVENT_OFFERINGS_FETCH,
                     mapOf(
+                        "cache_hit" to origin.cacheHit,
                         "duration_ms" to (dateProvider.now().time - startedAtMs),
                         "count" to offerings.all.size,
                         "not_found_product_ids" to offerings.notFoundProductIds.take(NOT_FOUND_IDS_LIMIT),
                     ),
                 )
+                // 「后端挂了、付费墙用的是盘上旧数据」必须自己冒个泡：价格可能已经变了
+                // （契约 §1.3 的 `sdk_warning`，code 与 iOS 同名）。
+                if (origin == DeliveryOrigin.STALE_FALLBACK) {
+                    diagnostics.warn(
+                        DiagnosticsWarningCode.OFFERINGS_CACHE_FALLBACK,
+                        "count=${offerings.all.size}",
+                    )
+                }
                 callback.onReceived(offerings)
             },
         )
@@ -658,7 +697,7 @@ internal class PurchasesOrchestrator(
      */
     fun restorePurchases(callback: ReceiveCustomerInfoCallback) {
         val startedAtMs = dateProvider.now().time
-        val callback = trackingResult(DiagnosticsTracker.EVENT_RESTORE_PURCHASES, startedAtMs, callback)
+        val callback = trackingResult(DiagnosticsTracker.EVENT_RESTORE, startedAtMs, callback)
         val appUserID = this.appUserID
         billing.queryPurchases(
             onSuccess = { byHashedToken ->
@@ -700,7 +739,7 @@ internal class PurchasesOrchestrator(
      */
     fun syncPurchases(callback: ReceiveCustomerInfoCallback) {
         val startedAtMs = dateProvider.now().time
-        val callback = trackingResult(DiagnosticsTracker.EVENT_SYNC_PURCHASES, startedAtMs, callback)
+        val callback = trackingResult(DiagnosticsTracker.EVENT_SYNC, startedAtMs, callback)
         val appUserID = this.appUserID
         billing.queryPurchases(
             onSuccess = { byHashedToken ->

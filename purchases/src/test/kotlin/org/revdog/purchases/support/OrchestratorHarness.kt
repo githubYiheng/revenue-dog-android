@@ -17,10 +17,12 @@ import org.revdog.purchases.diagnostics.DiagnosticsTracker
 import org.revdog.purchases.identity.IdentityManager
 import org.revdog.purchases.networking.Backend
 import org.revdog.purchases.networking.ETagManager
+import org.revdog.purchases.networking.ETagPayloadStore
 import org.revdog.purchases.offerings.OfferingsManager
 import org.revdog.purchases.posting.PostPendingTransactionsHelper
 import org.revdog.purchases.posting.PostReceiptHelper
 import org.revdog.purchases.posting.PostTransactionsHelper
+import java.io.File
 import java.util.Date
 
 /** 记录型诊断 tracker：断言打点清单用。 */
@@ -59,6 +61,13 @@ internal class OrchestratorHarness(
     sharedPrefsName: String? = null,
     /** A8 的自保阈值。默认就是生产值（24h），A8 用例传小值。 */
     ackSelfProtectThresholdMs: Long = PostReceiptHelper.ACK_SELF_PROTECT_THRESHOLD_MS,
+    /**
+     * ETag payload 目录。**M4 新增**：默认每个 harness 一个目录（用例之间不串味），
+     * 传同一个 [ETagPayloadStore] 可以模拟「进程重启但缓存还在」，
+     * 直接 `clear()` 它则模拟「304 到了但本地 payload 没了」（坑：ETag 必须能自愈）。
+     */
+    val eTagPayloadStore: ETagPayloadStore =
+        ETagPayloadStore(File(context.cacheDir, "etag-${System.nanoTime()}")),
 ) {
 
     val diagnostics: RecordingDiagnosticsTracker = RecordingDiagnosticsTracker()
@@ -74,7 +83,11 @@ internal class OrchestratorHarness(
         diagnosticsEnabled = true,
     ).apply { isAppBackgrounded = false }
 
-    val httpClient: FakeHTTPClient = FakeHTTPClient(appConfig, ETagManager(context))
+    /** ETag 元数据在 package 级 prefs 里，跨 harness 共享 —— 建完先清，用例之间不串味。 */
+    val eTagManager: ETagManager =
+        ETagManager(context, payloadStore = eTagPayloadStore).also { it.clearCaches() }
+
+    val httpClient: FakeHTTPClient = FakeHTTPClient(appConfig, eTagManager)
 
     /** 可变的「现在」：A8 用例要把时钟往前推 24h。 */
     var nowMs: Long = now.time

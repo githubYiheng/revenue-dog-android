@@ -44,6 +44,16 @@ internal class FakeHTTPClient(
     }
 
     /**
+     * 抛任意异常。M4 故障注入用：**超时与断网必须分别注入** ——
+     * `SocketTimeoutException` 是 `IOException` 的子类，两者在我方代码里走同一条
+     * `networkError` 分支，但这条等价关系正是需要被测试锁住的东西（改动 catch 分支时
+     * 很容易把 `SocketTimeoutException` 漏进「未捕获异常 → rethrow 到主线程」那条路）。
+     */
+    fun enqueueThrowable(throwable: Throwable) {
+        queuedResponses.addLast(Result.failure(throwable))
+    }
+
+    /**
      * 在「请求已记录、响应还没返回」之间插一脚。
      * 用来观察**在飞期间**的行为（诊断上传的单飞闸就靠它测）。
      */

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+      BILLING 与 INTERNET 由 aar 的 manifest 合并进来（`purchases/src/main/AndroidManifest.xml`），
+      宿主不必重复声明 —— 这本身也是一条要被验证的事：清单合并断了，手测 app 会在
+      launchBillingFlow 时直接失败。
+    -->
+
+    <application
+        android:name=".DemoApplication"
+        android:allowBackup="false"
+        android:label="RevenueDog Example">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="RevenueDog Example">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

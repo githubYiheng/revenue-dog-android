@@ -53,8 +53,15 @@ internal interface DiagnosticsTracker {
         const val EVENT_PURCHASE_RESULT: String = "purchase_result"
         const val EVENT_RECEIPT_POST: String = "receipt_post"
         const val EVENT_PURCHASE_PENDING: String = "purchase_pending"
-        const val EVENT_RESTORE_PURCHASES: String = "restore_purchases"
-        const val EVENT_SYNC_PURCHASES: String = "sync_purchases"
+        /**
+         * `restore` / `sync`（**M4 改名**：M2/M3 期间叫 `restore_purchases` / `sync_purchases`）。
+         *
+         * 改名的理由只有一条：`sdk-diagnostics.md` §1.3 的契约名与 iOS 发的都是 `restore` / `sync`，
+         * 两端事件名不一致会让 admin 的时间线与巡检聚合按平台分裂 —— 同一件事在后台要能用同一个
+         * `type` 查出来。首个 tag 之前改掉，不留兼容别名（线上没有历史数据要兼容）。
+         */
+        const val EVENT_RESTORE: String = "restore"
+        const val EVENT_SYNC: String = "sync"
 
         // M3 新增。
         /** 契约 §1.3 的 `sdk_warning`（`code` 取值见 [DiagnosticsWarningCode]）。 */
