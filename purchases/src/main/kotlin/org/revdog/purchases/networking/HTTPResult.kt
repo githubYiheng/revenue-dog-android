@@ -73,6 +73,7 @@ internal class HTTPResult(
             underlyingErrorMessage = backendErrorMessage ?: "HTTP $responseCode",
             backendCode = backendErrorCode,
             httpStatusCode = responseCode,
+            requestId = requestId,
         )
     }
 

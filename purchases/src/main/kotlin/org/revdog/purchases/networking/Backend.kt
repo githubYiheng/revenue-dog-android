@@ -26,6 +26,9 @@ internal typealias LogInCallbackPair = Pair<(CustomerInfo, Boolean) -> Unit, (Pu
 internal typealias PostReceiptSuccessCallback = (PostReceiptResponse) -> Unit
 internal typealias PostReceiptErrorCallback = (PurchasesError, PostReceiptErrorHandling) -> Unit
 internal typealias PostReceiptCallbackPair = Pair<PostReceiptSuccessCallback, PostReceiptErrorCallback>
+internal typealias AttributesSuccessCallback = (HTTPResult) -> Unit
+internal typealias AttributesErrorCallback = (PurchasesError, HTTPResult?) -> Unit
+internal typealias AttributesCallbackPair = Pair<AttributesSuccessCallback, AttributesErrorCallback>
 
 /**
  * 端点门面 + **并发去重**。结构对照 RC `common/Backend.kt`。
@@ -33,6 +36,9 @@ internal typealias PostReceiptCallbackPair = Pair<PostReceiptSuccessCallback, Po
  * 每个端点一张 callbacks map：同 key 的第二次调用不再发请求，而是挂到已经在飞的那一次上
  * （RC 的 `addCallback`，考古 §2.13）。20 行解决重复请求浪费配额与响应乱序。
  */
+// 函数数 = 端点数 × 2（每个端点一个入口 + 一个 body 拼装）。按端点拆类只会让
+// callbacks map 的去重纪律散到几个文件里（RC 也是一个 Backend 打天下）。
+@Suppress("TooManyFunctions")
 internal class Backend(
     private val httpClient: HTTPClient,
     private val dispatcher: Dispatcher,
@@ -60,6 +66,11 @@ internal class Backend(
     @Volatile
     @VisibleForTesting
     internal var postReceiptCallbacks = mutableMapOf<CallbackCacheKey, MutableList<PostReceiptCallbackPair>>()
+
+    @get:Synchronized @set:Synchronized
+    @Volatile
+    @VisibleForTesting
+    internal var attributesCallbacks = mutableMapOf<CallbackCacheKey, MutableList<AttributesCallbackPair>>()
 
     fun close() {
         dispatcher.close()
@@ -243,18 +254,25 @@ internal class Backend(
         initiationSource: String,
         purchasesAreCompletedBy: PurchasesAreCompletedBy,
         appInBackground: Boolean,
+        /** 搭车的待同步属性（契约 §2.1 的 `attributes`，语义同 §2.4）。没有就不发这个键。 */
+        attributes: JSONObject? = null,
+        /** A8 的 `acknowledged_by`（设计 §3 A8）：目前只有一个取值 `sdk_timeout`。 */
+        acknowledgedBy: String? = null,
         onSuccess: PostReceiptSuccessCallback,
         onError: PostReceiptErrorCallback,
     ) {
         val finishTransactions = purchasesAreCompletedBy == PurchasesAreCompletedBy.REVENUE_DOG
         val cacheKey = CallbackCacheKey(
-            parts = listOf(
+            parts = listOfNotNull(
                 purchaseToken,
                 appUserID,
                 isRestore.toString(),
                 initiationSource,
                 purchasesAreCompletedBy.rawValue,
                 receiptInfo.toJson().toString(),
+                // 搭车属性与 A8 标记都改变了这次请求的**内容**，不能与不带它们的那次合并。
+                attributes?.toString(),
+                acknowledgedBy,
             ),
             appInBackground = appInBackground,
         )
@@ -266,6 +284,8 @@ internal class Backend(
             initiationSource = initiationSource,
             purchasesAreCompletedBy = purchasesAreCompletedBy,
             finishTransactions = finishTransactions,
+            attributes = attributes,
+            acknowledgedBy = acknowledgedBy,
         )
 
         val call = object : AsyncCall() {
@@ -310,6 +330,75 @@ internal class Backend(
         }
     }
 
+    // region POST /v1/subscribers/{id}/attributes
+
+    /**
+     * 属性同步（契约 §2.4）。结构对照 RC `SubscriberAttributesPoster` + `Backend` 的
+     * `performRequest`；语义分类（哪种失败算「后端已经拿到了」）在
+     * [org.revdog.purchases.attributes.SubscriberAttributesPoster] 里，本方法只管 HTTP。
+     *
+     * 并发去重的 key 带上属性内容本身：同一批属性重复触发（前后台抖动）合并成一次请求，
+     * 但内容变了就必须真发一次。
+     */
+    fun postSubscriberAttributes(
+        appUserID: String,
+        attributes: JSONObject,
+        appInBackground: Boolean,
+        onSuccess: AttributesSuccessCallback,
+        onError: AttributesErrorCallback,
+    ) {
+        val endpoint = Endpoint.PostAttributes(appUserID)
+        val cacheKey = CallbackCacheKey(listOf(endpoint.path, attributes.toString()), appInBackground)
+        val body = JSONObject().put(ATTRIBUTES, attributes)
+        val call = object : AsyncCall() {
+            override fun call(): HTTPResult = httpClient.performRequest(endpoint, body)
+
+            override fun onCompletion(result: HTTPResult) {
+                val callbacks = synchronized(this@Backend) { attributesCallbacks.remove(cacheKey) } ?: return
+                callbacks.forEach { (success, failure) ->
+                    if (result.isSuccessful()) success(result) else failure(result.toPurchasesError(), result)
+                }
+            }
+
+            override fun onError(error: PurchasesError) {
+                val callbacks = synchronized(this@Backend) { attributesCallbacks.remove(cacheKey) } ?: return
+                callbacks.forEach { (_, failure) -> failure(error, null) }
+            }
+        }
+        synchronized(this) {
+            attributesCallbacks.addCallback(
+                call = call,
+                cacheKey = cacheKey,
+                functions = onSuccess to onError,
+                delay = Delay.jitterOnlyIfInBackground(appInBackground),
+            )
+        }
+    }
+
+    // endregion
+
+    // region POST /v1/diagnostics/events
+
+    /**
+     * 诊断攒批上传（`sdk-diagnostics.md` §1）。**同步执行、不走 callbacks map、不走 Dispatcher**
+     * —— 三处都与其它端点不同，理由各自独立：
+     *
+     * - **同步**：调用方（`DiagnosticsUploader`）本来就跑在专用诊断线程上（对照 RC 的
+     *   `revenuecat-events-thread`），而且它要按「一批成功再发下一批」的顺序推进，
+     *   回调式在这里只会把顺序拆散。
+     * - **不去重**：上传器自己有单飞闸（`AtomicBoolean`），不会有第二个在飞。
+     * - **原始状态码**：处置矩阵按 HTTP 状态码分叉（401/403 停 1h、429 读 `Retry-After`、
+     *   其余 4xx 丢批、5xx 退避），[HTTPResult.toPurchasesError] 会把 413 / 429 / 503
+     *   揉成同几个 code，那正好是这里最不能丢的信息（与 iOS `performUnchecked` 同做法）。
+     *
+     * @return 成功拿到响应（**不论状态码**）就是 `success`；网络层失败是 `failure`。
+     */
+    fun postDiagnosticsEventsBlocking(body: JSONObject): Result<HTTPResult> = runCatching {
+        httpClient.performRequest(Endpoint.PostDiagnosticsEvents, body)
+    }
+
+    // endregion
+
     @Suppress("LongParameterList")
     private fun receiptBody(
         purchaseToken: String,
@@ -319,6 +408,8 @@ internal class Backend(
         initiationSource: String,
         purchasesAreCompletedBy: PurchasesAreCompletedBy,
         finishTransactions: Boolean,
+        attributes: JSONObject?,
+        acknowledgedBy: String?,
     ): JSONObject = JSONObject().apply {
         put(FETCH_TOKEN, purchaseToken)
         put(APP_USER_ID, appUserID)
@@ -338,6 +429,8 @@ internal class Backend(
         receiptInfo.durationIso?.let { put(NORMAL_DURATION, it) }
         receiptInfo.pricingPhases?.let { phases -> put(PRICING_PHASES, JSONArray(phases.map { it.toWireJson() })) }
         receiptInfo.replacementMode?.let { put(PRORATION_MODE, it.wireName) }
+        attributes?.takeIf { it.length() > 0 }?.let { put(ATTRIBUTES, it) }
+        acknowledgedBy?.let { put(ACKNOWLEDGED_BY, it) }
     }
 
     // endregion
@@ -413,6 +506,7 @@ internal class Backend(
     internal companion object {
         const val APP_USER_ID: String = "app_user_id"
         const val NEW_APP_USER_ID: String = "new_app_user_id"
+        const val ATTRIBUTES: String = "attributes"
 
         // POST /v1/receipts 的 body 键（`google-play-plan.md` §5）。
         const val FETCH_TOKEN: String = "fetch_token"
@@ -432,6 +526,10 @@ internal class Backend(
         const val NORMAL_DURATION: String = "normal_duration"
         const val PRICING_PHASES: String = "pricing_phases"
         const val PRORATION_MODE: String = "proration_mode"
+        const val ACKNOWLEDGED_BY: String = "acknowledged_by"
+
+        /** [ACKNOWLEDGED_BY] 的唯一取值（设计 §3 A8）。 */
+        const val ACKNOWLEDGED_BY_SDK_TIMEOUT: String = "sdk_timeout"
 
         /**
          * 恒为 1。RC 的注释值得原样抄：**改动 POST receipt 的 payload 形状时才 +1，

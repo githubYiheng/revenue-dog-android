@@ -43,8 +43,15 @@ internal class FakeHTTPClient(
         queuedResponses.addLast(Result.failure(IOException(message)))
     }
 
+    /**
+     * 在「请求已记录、响应还没返回」之间插一脚。
+     * 用来观察**在飞期间**的行为（诊断上传的单飞闸就靠它测）。
+     */
+    var beforeResponse: (() -> Unit)? = null
+
     override fun executeRequest(request: HTTPRequest): HTTPResult {
         recordedRequests += request
+        beforeResponse?.invoke()
         val result = queuedResponses.removeFirstOrNull() ?: defaultResponse
         return result.getOrElse { throw it }
     }

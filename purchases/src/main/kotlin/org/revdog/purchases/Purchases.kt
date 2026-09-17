@@ -2,6 +2,7 @@ package org.revdog.purchases
 
 import androidx.annotation.VisibleForTesting
 import kotlinx.coroutines.flow.Flow
+import org.revdog.purchases.attributes.SubscriberAttributeKeys
 import org.revdog.purchases.customerinfo.CustomerInfo
 import org.revdog.purchases.offerings.Offerings
 
@@ -18,6 +19,9 @@ import org.revdog.purchases.offerings.Offerings
  * 已装：configure / 身份 / CustomerInfo / offerings / 购买 / 恢复 / 同步。
  * 属性同步在 M3 追加（公开面**只进不出**，追加 = 次版本号）。
  */
+// 属性 setter 全集就有 40 多个（契约 §2.4 的保留键一个一个方法，与 iOS 公开面逐个对应）。
+// 门面本身零逻辑，全部转发给编排层 —— 拆类只会让宿主要记住两个入口。
+@Suppress("TooManyFunctions")
 public class Purchases private constructor(
     private val orchestrator: PurchasesOrchestrator,
 ) {
@@ -166,6 +170,111 @@ public class Purchases private constructor(
     }
 
     // endregion
+
+    // region 订阅者属性（契约 §2.4）
+
+    /**
+     * 写入一批**自定义**属性。
+     *
+     * - 键：字母开头、≤ 40 字符、只含 `[A-Za-z0-9_-]`；**不得以 `$` 开头**（保留前缀，请用专用 setter）；
+     * - 值：≤ 500 字符；`null` 或空串 = **删除该属性**；
+     * - 每个用户最多 50 个非空自定义属性。
+     *
+     * **不会立刻发请求**（与 iOS / RC 同款）：同步时机是进后台 / 回前台 / 购买上报搭车 /
+     * logIn 合并前后 / [syncAttributes]。所以它是 fire-and-forget —— 不抛错、不回调；
+     * 不合规的键被忽略并打 warn 日志（服务端对非法键**整批 400**，端上先挡才不会连累合法键）。
+     */
+    public fun setAttributes(attributes: Map<String, String?>) {
+        val reserved = attributes.keys.filter { it.startsWith("$") }
+        if (reserved.isNotEmpty()) {
+            Logger.warn { "setAttributes 收到保留键（`$` 前缀），已忽略：${reserved.sorted()} —— 请用专用 setter" }
+        }
+        orchestrator.setAttributes(attributes.filterKeys { !it.startsWith("$") })
+    }
+
+    /** 采集设备标识：`$gpsAdId`（宿主自己引了 play-services-ads-identifier 才拿得到）/ `$androidId` / `$ip` / `$deviceVersion`。 */
+    public fun collectDeviceIdentifiers() {
+        orchestrator.collectDeviceIdentifiers()
+    }
+
+    /** 立刻把待同步属性发出去。正常不必调 —— 生命周期与购买链路已经覆盖了同步时机。 */
+    public fun syncAttributes() {
+        orchestrator.syncAttributes()
+    }
+
+    // 保留键的专用 setter（契约 §2.4 保留键全集 + 附录 A 决策 12 的归因键）。
+    // 一律 `null` / 空串 = 删除。与 iOS 的公开面逐个对应。
+
+    public fun setEmail(value: String?): Unit = setReserved(SubscriberAttributeKeys.EMAIL, value)
+    public fun setPhoneNumber(value: String?): Unit = setReserved(SubscriberAttributeKeys.PHONE_NUMBER, value)
+    public fun setDisplayName(value: String?): Unit = setReserved(SubscriberAttributeKeys.DISPLAY_NAME, value)
+
+    /** Android 的推送 token = FCM token（`$fcmTokens`）。iOS 那边同名方法写的是 APNs。 */
+    public fun setPushToken(value: String?): Unit = setReserved(SubscriberAttributeKeys.FCM_TOKENS, value)
+    public fun setFCMToken(value: String?): Unit = setReserved(SubscriberAttributeKeys.FCM_TOKENS, value)
+
+    /** iOS 专属语义的保留键，Android 侧留着让跨端宿主一套代码能跑（服务端一视同仁存下来）。 */
+    public fun setAPNSToken(value: String?): Unit = setReserved(SubscriberAttributeKeys.APNS_TOKENS, value)
+    public fun setATTConsentStatus(value: String?): Unit =
+        setReserved(SubscriberAttributeKeys.ATT_CONSENT_STATUS, value)
+    public fun setIDFA(value: String?): Unit = setReserved(SubscriberAttributeKeys.IDFA, value)
+    public fun setIDFV(value: String?): Unit = setReserved(SubscriberAttributeKeys.IDFV, value)
+    public fun setAppleRefundHandlingPreference(value: String?): Unit =
+        setReserved(SubscriberAttributeKeys.APPLE_REFUND_HANDLING_PREFERENCE, value)
+
+    public fun setGPSAdID(value: String?): Unit = setReserved(SubscriberAttributeKeys.GPS_AD_ID, value)
+    public fun setAndroidID(value: String?): Unit = setReserved(SubscriberAttributeKeys.ANDROID_ID, value)
+    public fun setAmazonAdID(value: String?): Unit = setReserved(SubscriberAttributeKeys.AMAZON_AD_ID, value)
+    public fun setIP(value: String?): Unit = setReserved(SubscriberAttributeKeys.IP, value)
+    public fun setDeviceVersion(value: String?): Unit = setReserved(SubscriberAttributeKeys.DEVICE_VERSION, value)
+
+    public fun setAdjustID(value: String?): Unit = setReserved(SubscriberAttributeKeys.ADJUST_ID, value)
+    public fun setAmplitudeDeviceID(value: String?): Unit =
+        setReserved(SubscriberAttributeKeys.AMPLITUDE_DEVICE_ID, value)
+    public fun setAmplitudeUserID(value: String?): Unit = setReserved(SubscriberAttributeKeys.AMPLITUDE_USER_ID, value)
+    public fun setAppsflyerID(value: String?): Unit = setReserved(SubscriberAttributeKeys.APPSFLYER_ID, value)
+    public fun setAppstackID(value: String?): Unit = setReserved(SubscriberAttributeKeys.APPSTACK_ID, value)
+    public fun setBrazeAliasName(value: String?): Unit = setReserved(SubscriberAttributeKeys.BRAZE_ALIAS_NAME, value)
+    public fun setBrazeAliasLabel(value: String?): Unit = setReserved(SubscriberAttributeKeys.BRAZE_ALIAS_LABEL, value)
+    public fun setCleverTapID(value: String?): Unit = setReserved(SubscriberAttributeKeys.CLEVERTAP_ID, value)
+    public fun setCustomerioID(value: String?): Unit = setReserved(SubscriberAttributeKeys.CUSTOMERIO_ID, value)
+    public fun setFBAnonymousID(value: String?): Unit = setReserved(SubscriberAttributeKeys.FB_ANON_ID, value)
+    public fun setFirebaseAppInstanceID(value: String?): Unit =
+        setReserved(SubscriberAttributeKeys.FIREBASE_APP_INSTANCE_ID, value)
+    public fun setKochavaDeviceID(value: String?): Unit = setReserved(SubscriberAttributeKeys.KOCHAVA_DEVICE_ID, value)
+    public fun setMixpanelDistinctID(value: String?): Unit =
+        setReserved(SubscriberAttributeKeys.MIXPANEL_DISTINCT_ID, value)
+    public fun setMparticleID(value: String?): Unit = setReserved(SubscriberAttributeKeys.MPARTICLE_ID, value)
+    public fun setOnesignalID(value: String?): Unit = setReserved(SubscriberAttributeKeys.ONESIGNAL_ID, value)
+    public fun setAirshipChannelID(value: String?): Unit =
+        setReserved(SubscriberAttributeKeys.AIRSHIP_CHANNEL_ID, value)
+    public fun setIterableUserID(value: String?): Unit = setReserved(SubscriberAttributeKeys.ITERABLE_USER_ID, value)
+    public fun setIterableCampaignID(value: String?): Unit =
+        setReserved(SubscriberAttributeKeys.ITERABLE_CAMPAIGN_ID, value)
+    public fun setIterableTemplateID(value: String?): Unit =
+        setReserved(SubscriberAttributeKeys.ITERABLE_TEMPLATE_ID, value)
+    public fun setPostHogUserID(value: String?): Unit = setReserved(SubscriberAttributeKeys.POSTHOG_USER_ID, value)
+    public fun setTenjinID(value: String?): Unit = setReserved(SubscriberAttributeKeys.TENJIN_ID, value)
+
+    public fun setMediaSource(value: String?): Unit = setReserved(SubscriberAttributeKeys.MEDIA_SOURCE, value)
+    public fun setCampaign(value: String?): Unit = setReserved(SubscriberAttributeKeys.CAMPAIGN, value)
+    public fun setAdGroup(value: String?): Unit = setReserved(SubscriberAttributeKeys.AD_GROUP, value)
+    public fun setAd(value: String?): Unit = setReserved(SubscriberAttributeKeys.AD, value)
+    public fun setKeyword(value: String?): Unit = setReserved(SubscriberAttributeKeys.KEYWORD, value)
+    public fun setCreative(value: String?): Unit = setReserved(SubscriberAttributeKeys.CREATIVE, value)
+
+    private fun setReserved(key: String, value: String?) {
+        orchestrator.setAttribute(key, value)
+    }
+
+    // endregion
+
+    /**
+     * 诊断管线是否开着（`PurchasesConfiguration.Builder.diagnosticsEnabled`，默认 `true`）。
+     * 只读 —— 运行期切换会让一半事件在盘上、一半不在，排障时反而更糊。
+     */
+    public val diagnosticsEnabled: Boolean
+        get() = orchestrator.diagnosticsEnabled
 
     /** 前后台状态。SDK 已自动跟随进程生命周期，这里留给宿主 / 测试显式覆盖。 */
     public fun setAppBackgrounded(backgrounded: Boolean) {

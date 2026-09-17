@@ -68,9 +68,17 @@ class ErrorCodesContractTest {
 
     @Test
     fun `与 iOS 共有的关键码位对齐`() {
-        // 抽查几个最容易手抖写错的：RC 的 13 / 18-22 / 27 是空缺，我方也必须空缺。
+        // 抽查几个最容易手抖写错的：RC 的 13 / 18-19 / 21-22 / 27 是空缺，我方也必须空缺。
+        // **20 在 M3 被占用**（paymentPendingError，与 RC `PaymentPendingError` 同位）。
         val codes = PurchasesErrorCode.ALL.map { it.code }.toSet()
-        assertThat(codes).doesNotContain(13, 18, 19, 20, 21, 22, 27, 30, 31, 32, 33, 34)
-        assertThat(codes).contains(0, 1, 2, 3, 10, 14, 23, 28, 35, 900, 901, 902)
+        assertThat(codes).doesNotContain(13, 18, 19, 21, 22, 27, 30, 31, 32, 33, 34)
+        assertThat(codes).contains(0, 1, 2, 3, 10, 14, 20, 23, 28, 35, 900, 901, 902)
+    }
+
+    @Test
+    fun `pending 码位与 RC 同位同名`() {
+        assertThat(PurchasesErrorCode.PaymentPendingError.code).isEqualTo(20)
+        assertThat(PurchasesErrorCode.PaymentPendingError.name).isEqualTo("paymentPendingError")
+        assertThat(PurchasesErrorCode.fromCode(20)).isEqualTo(PurchasesErrorCode.PaymentPendingError)
     }
 }

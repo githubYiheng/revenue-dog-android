@@ -46,6 +46,13 @@ public class PurchasesErrorCode private constructor(
         @JvmField public val UnknownBackendError: PurchasesErrorCode = PurchasesErrorCode(16, "unknownBackendError")
         @JvmField public val InvalidAppleSubscriptionKeyError: PurchasesErrorCode =
             PurchasesErrorCode(17, "invalidAppleSubscriptionKeyError")
+
+        /**
+         * 付款尚在进行中：Play 的 `PENDING` / `UNSPECIFIED_STATE` 交易（现金支付、待家长批准、
+         * 预付费套餐）。**钱还没扣** —— 宿主既不该发权益，也不该提示失败。
+         * 码位与 RC 的 `PaymentPendingError` 同位（20）。
+         */
+        @JvmField public val PaymentPendingError: PurchasesErrorCode = PurchasesErrorCode(20, "paymentPendingError")
         @JvmField public val ConfigurationError: PurchasesErrorCode = PurchasesErrorCode(23, "configurationError")
         @JvmField public val UnsupportedError: PurchasesErrorCode = PurchasesErrorCode(24, "unsupportedError")
         @JvmField public val EmptySubscriberAttributesError: PurchasesErrorCode =
@@ -80,7 +87,8 @@ public class PurchasesErrorCode private constructor(
             ProductNotAvailableForPurchaseError, ProductAlreadyPurchasedError, ReceiptAlreadyInUseError,
             InvalidReceiptError, MissingReceiptFileError, NetworkError, InvalidCredentialsError,
             UnexpectedBackendResponseError, InvalidAppUserIdError, OperationAlreadyInProgressError,
-            UnknownBackendError, InvalidAppleSubscriptionKeyError, ConfigurationError, UnsupportedError,
+            UnknownBackendError, InvalidAppleSubscriptionKeyError, PaymentPendingError,
+            ConfigurationError, UnsupportedError,
             EmptySubscriberAttributesError, ProductDiscountMissingIdentifierError, CustomerInfoError,
             SystemInfoError, OfflineConnectionError, NotImplementedError, PurchasePendingServerConfirmation,
             PurchaseRejectedByServer,
@@ -108,6 +116,11 @@ public class PurchasesError @JvmOverloads constructor(
     /** 契约 §1.4 的 `code`（例如 7243 = 在 app 里用了 secret key）。 */
     public val backendCode: Int? = null,
     public val httpStatusCode: Int? = null,
+    /**
+     * 响应头 `X-Request-Id`（有就带）。排障时它是把宿主报的一句「买不了」接到
+     * 服务端日志与客户端诊断事件上的**唯一**线索（诊断事件的 `request_id` 取的是同一个值）。
+     */
+    public val requestId: String? = null,
 ) {
 
     public val message: String
@@ -117,6 +130,7 @@ public class PurchasesError @JvmOverloads constructor(
         append("[").append(code).append("] ").append(message)
         backendCode?.let { append(" backend_code=").append(it) }
         httpStatusCode?.let { append(" http=").append(it) }
+        requestId?.let { append(" request_id=").append(it) }
     }
 
     public companion object {

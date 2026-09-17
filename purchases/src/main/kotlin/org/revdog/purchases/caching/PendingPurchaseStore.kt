@@ -48,8 +48,15 @@ internal class PostedTransactionContext(
      * 补报时仍然用购买当时这一份，否则一笔在途购买会换一套 finish 语义。
      */
     val purchasesAreCompletedBy: PurchasesAreCompletedBy,
-    /** 首次上报时刻。M3 的 A8「24h 自保 ack」就靠它算超时。 */
+    /** 首次上报时刻。A8「24h 自保 ack」就靠它算超时。 */
     val firstAttemptAtMs: Long,
+    /**
+     * A8 已经触发过：SDK 在后端确认之前**自己 ack 了**这笔（防 Google 3 天自动退款，设计 §3 A8）。
+     *
+     * 一旦为 `true`，后续每一次上报都带 `acknowledged_by: "sdk_timeout"` —— 后端据此知道
+     * 「这笔的 ack 不是我做的」。落盘：进程重启后这个事实不能丢，否则后端永远不知道。
+     */
+    val ackSelfProtected: Boolean = false,
 )
 
 /**
@@ -211,6 +218,36 @@ internal class PendingPurchaseStore(
     fun hasPostContext(token: String): Boolean = readPosted().containsKey(token)
 
     @Synchronized
+    fun postContext(token: String): PostedTransactionContext? = readPosted()[token]
+
+    /**
+     * A8：标记「SDK 已经自保 ack 过这笔」。**只更新已落盘的上下文** ——
+     * restore / 补报路径不落盘上下文（`getOrPutPostContext` 只在 `purchase` 时写），
+     * 它们的 `firstAttemptAtMs` 永远是「此刻」，24h 阈值不可能被触发，所以这里也不会有东西要标。
+     *
+     * @return 是否真的写入了（`false` = 没有这个 token 的落盘上下文）。
+     */
+    @Synchronized
+    @Suppress("ReturnCount")
+    fun markAckSelfProtected(token: String): Boolean {
+        val posted = readPosted()
+        val existing = posted[token] ?: return false
+        if (existing.ackSelfProtected) return true
+        writePosted(
+            posted + (
+                token to PostedTransactionContext(
+                    token = existing.token,
+                    receiptInfo = existing.receiptInfo,
+                    purchasesAreCompletedBy = existing.purchasesAreCompletedBy,
+                    firstAttemptAtMs = existing.firstAttemptAtMs,
+                    ackSelfProtected = true,
+                )
+                ),
+        )
+        return true
+    }
+
+    @Synchronized
     fun allPostContexts(): List<PostedTransactionContext> = readPosted().values.sortedBy { it.firstAttemptAtMs }
 
     /** 只在**上报成功**或**确定性 4xx** 之后调用（铁律 A3）。 */
@@ -274,6 +311,7 @@ private const val KEY_STARTED_AT = "started_at_ms"
 private const val KEY_STATE = "state"
 private const val KEY_COMPLETED_BY = "purchases_are_completed_by"
 private const val KEY_FIRST_ATTEMPT_AT = "first_attempt_at_ms"
+private const val KEY_ACK_SELF_PROTECTED = "ack_self_protected"
 
 private fun PendingPurchase.toJson(): JSONObject = JSONObject().apply {
     put(KEY_PRODUCT_TYPE, productType.rawValue)
@@ -298,6 +336,7 @@ private fun PostedTransactionContext.toJson(): JSONObject = JSONObject().apply {
     put(KEY_RECEIPT_INFO, receiptInfo.toJson())
     put(KEY_COMPLETED_BY, purchasesAreCompletedBy.rawValue)
     put(KEY_FIRST_ATTEMPT_AT, firstAttemptAtMs)
+    if (ackSelfProtected) put(KEY_ACK_SELF_PROTECTED, true)
 }
 
 private fun JSONObject.toPostedContext(token: String): PostedTransactionContext = PostedTransactionContext(
@@ -309,4 +348,5 @@ private fun JSONObject.toPostedContext(token: String): PostedTransactionContext 
         PurchasesAreCompletedBy.REVENUE_DOG
     },
     firstAttemptAtMs = optLong(KEY_FIRST_ATTEMPT_AT),
+    ackSelfProtected = optBoolean(KEY_ACK_SELF_PROTECTED),
 )

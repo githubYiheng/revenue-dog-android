@@ -48,6 +48,12 @@ internal class AppConfig(
     val diagnosticsEnabled: Boolean,
 ) {
 
+    /**
+     * **application context**（`PurchasesConfiguration` 已经取过 `applicationContext`，
+     * 这里不会泄漏 Activity）。属性采集（`$androidId` / `$gpsAdId`）要用它。
+     */
+    val applicationContext: Context = context.applicationContext
+
     val packageName: String = context.packageName
 
     /** `X-Client-Version` = 宿主 `versionName`。取不到时发哨兵 `unknown`（服务端约定：哨兵不写库）。 */

@@ -1,6 +1,7 @@
 package org.revdog.purchases
 
 import android.os.Handler
+import android.os.HandlerThread
 import android.os.Looper
 import androidx.annotation.VisibleForTesting
 import androidx.lifecycle.DefaultLifecycleObserver
@@ -12,15 +13,25 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import org.revdog.purchases.attributes.SubscriberAttributesCache
+import org.revdog.purchases.attributes.SubscriberAttributesManager
+import org.revdog.purchases.attributes.SubscriberAttributesPoster
 import org.revdog.purchases.caching.DeviceCache
 import org.revdog.purchases.caching.PendingPurchaseStore
 import org.revdog.purchases.common.AppConfig
+import org.revdog.purchases.common.DateProvider
+import org.revdog.purchases.common.DefaultDateProvider
 import org.revdog.purchases.common.Dispatcher
 import org.revdog.purchases.common.MainDispatcher
 import org.revdog.purchases.customerinfo.CustomerInfo
 import org.revdog.purchases.customerinfo.CustomerInfoManager
 import org.revdog.purchases.customerinfo.CustomerInfoUpdateHandler
+import org.revdog.purchases.diagnostics.DiagnosticsQueue
+import org.revdog.purchases.diagnostics.DiagnosticsRecorder
+import org.revdog.purchases.diagnostics.DiagnosticsSettings
 import org.revdog.purchases.diagnostics.DiagnosticsTracker
+import org.revdog.purchases.diagnostics.DiagnosticsUploader
+import org.revdog.purchases.diagnostics.HandlerDiagnosticsScheduler
 import org.revdog.purchases.google.BillingWrapper
 import org.revdog.purchases.google.ReplaceProductInfo
 import org.revdog.purchases.identity.AccountToken
@@ -39,6 +50,7 @@ import org.revdog.purchases.posting.PostPendingTransactionsHelper
 import org.revdog.purchases.posting.PostReceiptHelper
 import org.revdog.purchases.posting.PostTransactionsHelper
 import org.revdog.purchases.posting.ReceiptInfo
+import java.util.UUID
 import java.util.concurrent.Executors
 
 /**
@@ -65,8 +77,12 @@ internal class PurchasesOrchestrator(
     private val postReceiptHelper: PostReceiptHelper,
     private val postTransactionsHelper: PostTransactionsHelper,
     private val postPendingTransactionsHelper: PostPendingTransactionsHelper,
+    private val attributesManager: SubscriberAttributesManager,
     configuredAppUserID: String?,
     private val observeProcessLifecycle: Boolean = true,
+    /** 关掉诊断时为 `null`（那时 [diagnostics] 是 no-op）。生命周期钩子要用它刷队列。 */
+    private val diagnosticsRecorder: DiagnosticsRecorder? = null,
+    private val dateProvider: DateProvider = DefaultDateProvider(),
 ) {
 
     private val customerInfoMutableFlow = MutableSharedFlow<CustomerInfo>(
@@ -83,10 +99,15 @@ internal class PurchasesOrchestrator(
             setAppBackgrounded(false)
             // 前台恢复是补报的两个触发点之一（考古 §3.4）。
             syncPendingPurchaseQueue()
+            // 属性同步时机之一（设计 §5）：回前台。
+            syncAttributes()
         }
 
         override fun onStop(owner: LifecycleOwner) {
             setAppBackgrounded(true)
+            // 进后台：属性与诊断都要在进程可能被冻结之前冲一次。
+            syncAttributes()
+            diagnosticsRecorder?.onAppBackgrounded()
         }
     }
 
@@ -124,10 +145,21 @@ internal class PurchasesOrchestrator(
             }
         }
 
+        diagnosticsRecorder?.appIsBackgrounded = { appConfig.isAppBackgrounded }
+        diagnosticsRecorder?.start()
+
+        // 字段与 iOS `sdk_configured` 逐项对齐（契约 §1.3）：`log_level` /
+        // `purchases_completed_by` / `has_app_user_id` / `diagnostics_enabled`。
+        // iOS 还有 `waits_for_login_before_sync` / `identity_gated` —— 那是身份门控
+        // （ADR 0046/0047）的开关，Android 侧没有这个模式，因此不发。
+        // `is_anonymous` 是 Android 多发的一项（`has_app_user_id` 说的是「宿主传没传」，
+        // 这一项说的是「解析之后到底是不是匿名」，影子期宿主注入 RC 匿名 id 时两者会不同）。
         diagnostics.track(
             DiagnosticsTracker.EVENT_SDK_CONFIGURED,
             mapOf(
+                "log_level" to Logger.logLevel.name,
                 "purchases_completed_by" to appConfig.purchasesAreCompletedBy.rawValue,
+                "has_app_user_id" to (configuredAppUserID != null),
                 "diagnostics_enabled" to appConfig.diagnosticsEnabled,
                 "is_anonymous" to identityManager.currentUserIsAnonymous(),
             ),
@@ -156,9 +188,15 @@ internal class PurchasesOrchestrator(
             )
             return
         }
+        val oldAppUserID = identityManager.currentAppUserID
+        // 属性同步时机之一（设计 §5）：**logIn 合并之前**先把旧身份的待发属性刷出去。
+        // 合并之后旧身份在服务端已经是别名了，那时再发会落到新 customer 名下（口径不一致）。
+        syncAttributes()
         identityManager.logIn(
             newAppUserID = newAppUserID,
             onSuccess = { customerInfo, created ->
+                // 刚才那一轮没发成功的，跟着身份搬到新 id（RC `copyUnsyncedSubscriberAttributes`）。
+                attributesManager.copyUnsyncedAttributes(from = oldAppUserID, to = newAppUserID)
                 updateHandler.resetLastSent()
                 updateHandler.notifyListeners(customerInfo, newAppUserID)
                 // 身份换了，offerings 也要按新身份重拉（不同用户可能命中不同 offering）。
@@ -173,6 +211,8 @@ internal class PurchasesOrchestrator(
                     DiagnosticsTracker.EVENT_IDENTITY_LOGIN,
                     mapOf("created" to created),
                 )
+                // 搬过去的那些在新身份下还没落库，立刻再刷一轮（设计 §5「logIn 合并前后」）。
+                syncAttributes()
                 mainDispatcher.dispatch { callback.onReceived(customerInfo, created) }
             },
             onError = { error ->
@@ -196,6 +236,8 @@ internal class PurchasesOrchestrator(
      * 不这么做的后果：一旦离线，设备就被留在一个**后端从没见过**的匿名 ID 上，身份分裂。
      */
     fun logOut(callback: ReceiveCustomerInfoCallback) {
+        // 与 logIn 同理：切身份之前把旧身份的待发属性刷出去。
+        syncAttributes()
         val candidateResult = identityManager.candidateAnonymousAppUserID()
         val candidate = candidateResult.getOrElse { throwable ->
             val error = (throwable as? PurchasesErrorHolder)?.error
@@ -238,12 +280,40 @@ internal class PurchasesOrchestrator(
     val cachedCustomerInfo: CustomerInfo? get() = customerInfoManager.cachedCustomerInfo(appUserID)
 
     fun getCustomerInfo(fetchPolicy: CacheFetchPolicy, callback: ReceiveCustomerInfoCallback) {
+        val startedAtMs = dateProvider.now().time
         customerInfoManager.getCustomerInfo(
             appUserID = appUserID,
             fetchPolicy = fetchPolicy,
             appInBackground = appConfig.isAppBackgrounded,
-            onSuccess = { callback.onReceived(it) },
-            onError = { callback.onError(it) },
+            onSuccess = {
+                trackFetch(DiagnosticsTracker.EVENT_CUSTOMER_INFO_FETCH, startedAtMs, fetchPolicy.rawValue, null)
+                callback.onReceived(it)
+            },
+            onError = { error ->
+                trackFetch(DiagnosticsTracker.EVENT_CUSTOMER_INFO_FETCH, startedAtMs, fetchPolicy.rawValue, error)
+                callback.onError(error)
+            },
+        )
+    }
+
+    /**
+     * 公开 callback 的诊断收口（契约 §1.3 的 `customer_info_fetch` / `offerings_fetch`）。
+     *
+     * 字段比 iOS 少两个：`cache_hit` 与 `status` / `request_id`。理由：这两条路上
+     * 「是否命中缓存」与「HTTP 状态」都在各自 Manager 内部（缓存命中时根本没有请求），
+     * 在编排层拿不到，而把 Manager 的构造签名改成带 tracker 会连带改掉一批 M1/M2 的装配点。
+     * **待核实 / M4 补**：把 `cache_hit` / `status` / `request_id` 下沉到 Manager 层。
+     */
+    private fun trackFetch(event: String, startedAtMs: Long, policy: String?, error: PurchasesError?) {
+        diagnostics.track(
+            event,
+            mapOf(
+                "policy" to policy,
+                "duration_ms" to (dateProvider.now().time - startedAtMs),
+                "error_code" to error?.code?.name,
+                "status" to error?.httpStatusCode,
+                "request_id" to error?.requestId,
+            ),
         )
     }
 
@@ -256,11 +326,25 @@ internal class PurchasesOrchestrator(
     // region Offerings
 
     fun getOfferings(callback: ReceiveOfferingsCallback) {
+        val startedAtMs = dateProvider.now().time
         offeringsManager.getOfferings(
             appUserID = appUserID,
             appInBackground = appConfig.isAppBackgrounded,
-            onError = { callback.onError(it) },
-            onSuccess = { callback.onReceived(it) },
+            onError = { error ->
+                trackFetch(DiagnosticsTracker.EVENT_OFFERINGS_FETCH, startedAtMs, null, error)
+                callback.onError(error)
+            },
+            onSuccess = { offerings ->
+                diagnostics.track(
+                    DiagnosticsTracker.EVENT_OFFERINGS_FETCH,
+                    mapOf(
+                        "duration_ms" to (dateProvider.now().time - startedAtMs),
+                        "count" to offerings.all.size,
+                        "not_found_product_ids" to offerings.notFoundProductIds.take(NOT_FOUND_IDS_LIMIT),
+                    ),
+                )
+                callback.onReceived(offerings)
+            },
         )
     }
 
@@ -573,7 +657,8 @@ internal class PurchasesOrchestrator(
      * 也就无从得知 `base_plan_id`，考古 §2.3 第 3 条）。
      */
     fun restorePurchases(callback: ReceiveCustomerInfoCallback) {
-        diagnostics.track(DiagnosticsTracker.EVENT_RESTORE_PURCHASES)
+        val startedAtMs = dateProvider.now().time
+        val callback = trackingResult(DiagnosticsTracker.EVENT_RESTORE_PURCHASES, startedAtMs, callback)
         val appUserID = this.appUserID
         billing.queryPurchases(
             onSuccess = { byHashedToken ->
@@ -614,7 +699,8 @@ internal class PurchasesOrchestrator(
      * 我方按自己的设计发 `unsynced_active_purchases`（A6 / 决策 C）。
      */
     fun syncPurchases(callback: ReceiveCustomerInfoCallback) {
-        diagnostics.track(DiagnosticsTracker.EVENT_SYNC_PURCHASES)
+        val startedAtMs = dateProvider.now().time
+        val callback = trackingResult(DiagnosticsTracker.EVENT_SYNC_PURCHASES, startedAtMs, callback)
         val appUserID = this.appUserID
         billing.queryPurchases(
             onSuccess = { byHashedToken ->
@@ -646,6 +732,78 @@ internal class PurchasesOrchestrator(
         postPendingTransactionsHelper.syncPendingPurchaseQueue(appUserID = appUserID)
     }
 
+    /**
+     * 把 restore / sync 的**结果**也打进同一个事件（M2 只打了「开始」）。
+     *
+     * 包一层回调而不是在各分支散打：这两个方法各有三条返回路径（空集 / 成功聚合 / 失败聚合），
+     * 散打必漏一条 —— 而「公开 callback 的 error 分支都要有打点」正是 M3 要收口的东西。
+     */
+    private fun trackingResult(
+        event: String,
+        startedAtMs: Long,
+        callback: ReceiveCustomerInfoCallback,
+    ): ReceiveCustomerInfoCallback {
+        diagnostics.track(event, mapOf("outcome" to "started"))
+        return object : ReceiveCustomerInfoCallback {
+            override fun onReceived(customerInfo: CustomerInfo) {
+                diagnostics.track(
+                    event,
+                    mapOf(
+                        "outcome" to DiagnosticsTracker.OUTCOME_SUCCESS,
+                        "duration_ms" to (dateProvider.now().time - startedAtMs),
+                    ),
+                )
+                callback.onReceived(customerInfo)
+            }
+
+            override fun onError(error: PurchasesError) {
+                diagnostics.track(
+                    event,
+                    mapOf(
+                        "outcome" to DiagnosticsTracker.OUTCOME_FAILED,
+                        "duration_ms" to (dateProvider.now().time - startedAtMs),
+                        "error_code" to error.code.name,
+                        "status" to error.httpStatusCode,
+                        "request_id" to error.requestId,
+                    ),
+                )
+                callback.onError(error)
+            }
+        }
+    }
+
+    // endregion
+
+    // region 属性（设计 §1「属性」/ §5；契约 §2.4）
+
+    /**
+     * 写入一批属性。**fire-and-forget**：不抛错、不回调，被拒绝的键只打日志 + 记诊断。
+     * @return 被拒绝的键（键名非法 / value > 500 / 触及 50 个自定义属性上限）。
+     */
+    fun setAttributes(attributes: Map<String, String?>): List<String> =
+        attributesManager.setAttributes(attributes, appUserID)
+
+    fun setAttribute(key: String, value: String?): List<String> =
+        attributesManager.setAttribute(key, value, appUserID)
+
+    fun collectDeviceIdentifiers() {
+        attributesManager.collectDeviceIdentifiers(appConfig.applicationContext, appUserID)
+    }
+
+    /** 立刻把待同步属性发出去（宿主显式调用 / 生命周期钩子 / logIn 前后）。 */
+    fun syncAttributes() {
+        attributesManager.synchronizeIfNeeded(
+            currentAppUserID = appUserID,
+            appInBackground = appConfig.isAppBackgrounded,
+        )
+    }
+
+    /** 测试与排障用的读视图。 */
+    @VisibleForTesting
+    internal fun unsyncedAttributes() = attributesManager.unsyncedAttributes(appUserID)
+
+    val diagnosticsEnabled: Boolean get() = appConfig.diagnosticsEnabled
+
     // endregion
 
     /** 前后台状态。进程生命周期观察者会自动维护；测试与宿主也可显式设。 */
@@ -655,6 +813,7 @@ internal class PurchasesOrchestrator(
     }
 
     fun close() {
+        diagnosticsRecorder?.close()
         if (observeProcessLifecycle) {
             mainDispatcher.dispatch {
                 runCatching { ProcessLifecycleOwner.get().lifecycle.removeObserver(lifecycleObserver) }
@@ -667,6 +826,9 @@ internal class PurchasesOrchestrator(
     }
 
     internal companion object {
+
+        /** `offerings_fetch.not_found_product_ids` 的上限（契约 §6-4：≤ 50 个字符串）。 */
+        const val NOT_FOUND_IDS_LIMIT: Int = 50
 
         /**
          * 生产装配。结构对照 RC `PurchasesFactory`。
@@ -708,7 +870,56 @@ internal class PurchasesOrchestrator(
             val identityManager = IdentityManager(deviceCache, backend)
             val updateHandler = CustomerInfoUpdateHandler(deviceCache, identityManager, mainDispatcher)
             val customerInfoManager = CustomerInfoManager(backend, deviceCache, updateHandler, mainDispatcher)
-            val diagnostics = org.revdog.purchases.diagnostics.NoOpDiagnosticsTracker
+
+            // 诊断：专用线程（对照 RC `revenuecat-events-thread`）+ 文件队列 + 攒批上传。
+            // **即使 diagnosticsEnabled = false 也要建**：`start()` 那一下要把上一版开着的时候
+            // 写在盘上的队列清掉（关掉诊断之后不该还有事件留在设备上）。
+            val diagnosticsThread = HandlerThread(DiagnosticsRecorder.THREAD_NAME).apply { start() }
+            val diagnosticsSettings = DiagnosticsSettings(
+                context.getSharedPreferences(
+                    "${context.packageName}${DeviceCache.PREFERENCES_FILE_SUFFIX}",
+                    android.content.Context.MODE_PRIVATE,
+                ),
+                configuration.apiKey,
+            )
+            val diagnosticsQueue = DiagnosticsQueue(DiagnosticsQueue.directoryIn(context.filesDir))
+            val diagnosticsDispatcher = Dispatcher(
+                Executors.newSingleThreadScheduledExecutor { runnable ->
+                    Thread(runnable, DiagnosticsRecorder.THREAD_NAME).apply { isDaemon = true }
+                },
+                mainHandler,
+            )
+            val diagnosticsRecorder = DiagnosticsRecorder(
+                queue = diagnosticsQueue,
+                uploader = DiagnosticsUploader(
+                    backend = backend,
+                    queue = diagnosticsQueue,
+                    settings = diagnosticsSettings,
+                    appConfig = appConfig,
+                    sessionID = UUID.randomUUID().toString().lowercase(),
+                ),
+                settings = diagnosticsSettings,
+                dispatcher = diagnosticsDispatcher,
+                scheduler = HandlerDiagnosticsScheduler(Handler(diagnosticsThread.looper)),
+                appUserIDProvider = { deviceCache.getCachedAppUserID() },
+                enabled = configuration.diagnosticsEnabled,
+                ownedThread = diagnosticsThread,
+            )
+            val diagnostics: DiagnosticsTracker = diagnosticsRecorder
+
+            val attributesManager = SubscriberAttributesManager(
+                cache = SubscriberAttributesCache(
+                    context.getSharedPreferences(
+                        "${context.packageName}${DeviceCache.PREFERENCES_FILE_SUFFIX}",
+                        android.content.Context.MODE_PRIVATE,
+                    ),
+                    configuration.apiKey,
+                ),
+                poster = SubscriberAttributesPoster(backend),
+                diagnostics = diagnostics,
+                dispatcher = dispatcher,
+            )
+
             val billing = BillingWrapper(
                 clientFactory = BillingWrapper.ClientFactory(
                     context,
@@ -727,6 +938,7 @@ internal class PurchasesOrchestrator(
                 deviceCache = deviceCache,
                 pendingPurchases = pendingPurchases,
                 diagnostics = diagnostics,
+                attributesManager = attributesManager,
             )
             val postTransactionsHelper = PostTransactionsHelper(billing, postReceiptHelper)
 
@@ -750,7 +962,9 @@ internal class PurchasesOrchestrator(
                     postTransactionsHelper = postTransactionsHelper,
                     postReceiptHelper = postReceiptHelper,
                 ),
+                attributesManager = attributesManager,
                 configuredAppUserID = configuration.appUserID,
+                diagnosticsRecorder = diagnosticsRecorder,
             )
         }
 

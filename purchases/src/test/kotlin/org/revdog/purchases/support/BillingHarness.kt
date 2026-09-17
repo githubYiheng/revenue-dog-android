@@ -70,6 +70,13 @@ internal class BillingHarness {
     /** 升降级时 `findPurchaseForProductId` 的返回值。 */
     var oldPurchase: StoreTransaction? = null
 
+    /** A8 用：`acknowledge` / `consumePurchase` 的调用记录。 */
+    val acknowledgedTokens: MutableList<String> = mutableListOf()
+    val consumedTokens: MutableList<String> = mutableListOf()
+
+    /** `false` 时 `acknowledge` 不回调成功（模拟 Play 侧 ack 失败）。 */
+    var acknowledgeSucceeds: Boolean = true
+
     init {
         every { wrapper.purchasesUpdatedListener = any() } answers { updatedListener = firstArg() }
         every { wrapper.stateListener = any() } answers { stateListener = firstArg() }
@@ -112,6 +119,21 @@ internal class BillingHarness {
                 val products = if (type == ProductType.SUBS) subscriptionProducts else inAppProducts
                 onReceive(QueryProductDetailsResponse(products, emptyList()))
             }
+        }
+
+        // A8 直接调 `acknowledge`（不经 consumeAndSave）：ack 成功才回调，失败什么都不回。
+        every { wrapper.acknowledge(any(), any()) } answers {
+            val token = firstArg<String>()
+            val onAcknowledged = secondArg<(String) -> Unit>()
+            acknowledgedTokens += token
+            if (acknowledgeSucceeds) onAcknowledged(token)
+        }
+
+        every { wrapper.consumePurchase(any(), any()) } answers {
+            val token = firstArg<String>()
+            val onConsumed = secondArg<(String) -> Unit>()
+            consumedTokens += token
+            onConsumed(token)
         }
 
         every { wrapper.consumeAndSave(any(), any(), any(), any()) } answers {

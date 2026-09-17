@@ -61,6 +61,10 @@ class PurchaseDiagnosticsTest {
         val post = harness.diagnostics.named(DiagnosticsTracker.EVENT_RECEIPT_POST).single()
         assertThat(post["initiation_source"]).isEqualTo("purchase")
         assertThat(post["outcome"]).isEqualTo(DiagnosticsTracker.OUTCOME_SUCCESS)
+        // M3 补齐的三个 wire 字段（契约 §1.3，与 iOS 同名）。
+        assertThat(post["status"]).isEqualTo(200)
+        assertThat(post["request_id"]).isEqualTo("req-test")
+        assertThat(post["duration_ms"]).isNotNull()
 
         val result = harness.diagnostics.named(DiagnosticsTracker.EVENT_PURCHASE_RESULT).single()
         assertThat(result["outcome"]).isEqualTo(DiagnosticsTracker.OUTCOME_COMPLETED)
@@ -80,7 +84,12 @@ class PurchaseDiagnosticsTest {
 
         val post = harness.diagnostics.named(DiagnosticsTracker.EVENT_RECEIPT_POST).single()
         assertThat(post["outcome"]).isEqualTo(DiagnosticsTracker.OUTCOME_RETRYABLE)
+        // `status` 是 wire 契约里的名字（服务端提成列做巡检不变式 18/19）；
+        // `http_status` 是 M2 留下的别名，保留以免打断既有查询。
+        assertThat(post["status"]).isEqualTo(503)
         assertThat(post["http_status"]).isEqualTo(503)
+        assertThat(post["error_class"]).isEqualTo("server")
+        assertThat(post["request_id"]).isEqualTo("req-test")
         assertThat(post["error_code"]).isEqualTo(PurchasesErrorCode.UnknownBackendError.name)
     }
 
@@ -122,6 +131,68 @@ class PurchaseDiagnosticsTest {
             "restore_purchases",
             "sync_purchases",
         )
+    }
+
+    @Test
+    fun `M3 新增的事件名`() {
+        assertThat(
+            listOf(
+                DiagnosticsTracker.EVENT_SDK_WARNING,
+                DiagnosticsTracker.EVENT_ATTRIBUTES_SYNC,
+            ),
+        ).containsExactly("sdk_warning", "attributes_sync")
+    }
+
+    @Test
+    fun `公开 callback 的成功与失败分支都有打点`() {
+        // ① getCustomerInfo 失败
+        harness.httpClient.enqueue(500, """{"message":"boom"}""")
+        harness.orchestrator.getCustomerInfo(
+            CacheFetchPolicy.FETCH_CURRENT,
+            object : ReceiveCustomerInfoCallback {
+                override fun onReceived(customerInfo: org.revdog.purchases.customerinfo.CustomerInfo) = Unit
+                override fun onError(error: PurchasesError) = Unit
+            },
+        )
+        val fetch = harness.diagnostics.named(DiagnosticsTracker.EVENT_CUSTOMER_INFO_FETCH).single()
+        assertThat(fetch["policy"]).isEqualTo(CacheFetchPolicy.FETCH_CURRENT.rawValue)
+        assertThat(fetch["error_code"]).isEqualTo(PurchasesErrorCode.UnknownBackendError.name)
+        assertThat(fetch["status"]).isEqualTo(500)
+        assertThat(fetch["request_id"]).isEqualTo("req-test")
+
+        // ② getOfferings 失败
+        harness.httpClient.enqueue(500, """{"message":"boom"}""")
+        harness.orchestrator.getOfferings(
+            object : ReceiveOfferingsCallback {
+                override fun onReceived(offerings: org.revdog.purchases.offerings.Offerings) = Unit
+                override fun onError(error: PurchasesError) = Unit
+            },
+        )
+        assertThat(harness.diagnostics.named(DiagnosticsTracker.EVENT_OFFERINGS_FETCH).single()["error_code"])
+            .isEqualTo(PurchasesErrorCode.UnknownBackendError.name)
+
+        // ③ restore 失败（queryPurchases 直接报错）
+        billing.queryPurchasesError = PurchasesError(PurchasesErrorCode.StoreProblemError)
+        harness.orchestrator.restorePurchases(
+            object : ReceiveCustomerInfoCallback {
+                override fun onReceived(customerInfo: org.revdog.purchases.customerinfo.CustomerInfo) = Unit
+                override fun onError(error: PurchasesError) = Unit
+            },
+        )
+        val restore = harness.diagnostics.named(DiagnosticsTracker.EVENT_RESTORE_PURCHASES)
+        assertThat(restore.map { it["outcome"] })
+            .containsExactly("started", DiagnosticsTracker.OUTCOME_FAILED)
+        assertThat(restore.last()["error_code"]).isEqualTo(PurchasesErrorCode.StoreProblemError.name)
+
+        // ④ sync 失败
+        harness.orchestrator.syncPurchases(
+            object : ReceiveCustomerInfoCallback {
+                override fun onReceived(customerInfo: org.revdog.purchases.customerinfo.CustomerInfo) = Unit
+                override fun onError(error: PurchasesError) = Unit
+            },
+        )
+        assertThat(harness.diagnostics.named(DiagnosticsTracker.EVENT_SYNC_PURCHASES).map { it["outcome"] })
+            .containsExactly("started", DiagnosticsTracker.OUTCOME_FAILED)
     }
 
     @Test

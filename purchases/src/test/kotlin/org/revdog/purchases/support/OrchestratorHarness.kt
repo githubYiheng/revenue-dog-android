@@ -3,6 +3,9 @@ package org.revdog.purchases.support
 import android.content.Context
 import org.revdog.purchases.PurchasesAreCompletedBy
 import org.revdog.purchases.PurchasesOrchestrator
+import org.revdog.purchases.attributes.SubscriberAttributesCache
+import org.revdog.purchases.attributes.SubscriberAttributesManager
+import org.revdog.purchases.attributes.SubscriberAttributesPoster
 import org.revdog.purchases.caching.DeviceCache
 import org.revdog.purchases.caching.PendingPurchaseStore
 import org.revdog.purchases.common.AppConfig
@@ -54,6 +57,8 @@ internal class OrchestratorHarness(
     now: Date = Date(FIXED_NOW_MS),
     /** 传同一个名字可以模拟「进程重启但磁盘还在」。 */
     sharedPrefsName: String? = null,
+    /** A8 的自保阈值。默认就是生产值（24h），A8 用例传小值。 */
+    ackSelfProtectThresholdMs: Long = PostReceiptHelper.ACK_SELF_PROTECT_THRESHOLD_MS,
 ) {
 
     val diagnostics: RecordingDiagnosticsTracker = RecordingDiagnosticsTracker()
@@ -71,7 +76,10 @@ internal class OrchestratorHarness(
 
     val httpClient: FakeHTTPClient = FakeHTTPClient(appConfig, ETagManager(context))
 
-    private val dateProvider = DateProvider { now }
+    /** 可变的「现在」：A8 用例要把时钟往前推 24h。 */
+    var nowMs: Long = now.time
+
+    private val dateProvider = DateProvider { Date(nowMs) }
 
     val backend: Backend = Backend(httpClient, DirectDispatcher())
     val deviceCache: DeviceCache = DeviceCache(preferences, FakeHTTPClient.TEST_API_KEY, dateProvider)
@@ -83,6 +91,17 @@ internal class OrchestratorHarness(
     private val customerInfoManager =
         CustomerInfoManager(backend, deviceCache, updateHandler, MainDispatcher(null), dateProvider)
 
+    val attributesCache: SubscriberAttributesCache =
+        SubscriberAttributesCache(preferences, FakeHTTPClient.TEST_API_KEY)
+
+    val attributesManager: SubscriberAttributesManager = SubscriberAttributesManager(
+        cache = attributesCache,
+        poster = SubscriberAttributesPoster(backend),
+        diagnostics = diagnostics,
+        dispatcher = DirectDispatcher(),
+        dateProvider = dateProvider,
+    )
+
     val postReceiptHelper: PostReceiptHelper = PostReceiptHelper(
         appConfig = appConfig,
         backend = backend,
@@ -91,6 +110,9 @@ internal class OrchestratorHarness(
         deviceCache = deviceCache,
         pendingPurchases = pendingPurchases,
         diagnostics = diagnostics,
+        attributesManager = attributesManager,
+        dateProvider = dateProvider,
+        ackSelfProtectThresholdMs = ackSelfProtectThresholdMs,
     )
 
     private val postTransactionsHelper = PostTransactionsHelper(billing.wrapper, postReceiptHelper)
@@ -121,8 +143,10 @@ internal class OrchestratorHarness(
             postTransactionsHelper = postTransactionsHelper,
             postReceiptHelper = postReceiptHelper,
         ),
+        attributesManager = attributesManager,
         configuredAppUserID = appUserID,
         observeProcessLifecycle = false,
+        dateProvider = dateProvider,
     )
 
     /** 出站的 `POST /v1/receipts` 请求（按发出顺序）。 */

@@ -4,6 +4,8 @@ import org.json.JSONObject
 import org.revdog.purchases.InternalRevenueDogAPI
 import org.revdog.purchases.PurchasesError
 import org.revdog.purchases.PurchasesErrorCode
+import org.revdog.purchases.attributes.SubscriberAttributeError
+import org.revdog.purchases.attributes.parseAttributeErrors
 import org.revdog.purchases.common.keysSequence
 import org.revdog.purchases.customerinfo.CustomerInfo
 import org.revdog.purchases.customerinfo.CustomerInfoFactory
@@ -28,6 +30,13 @@ internal class PostReceiptResponse(
     val customerInfo: CustomerInfo,
     val shouldConsumeByProductId: Map<String, Boolean?>?,
     val body: JSONObject,
+    /** 响应头 `X-Request-Id`（诊断事件的 `request_id` 用它）。 */
+    val requestId: String? = null,
+    /**
+     * 搭车属性的逐键错误（契约 §2.4 的平铺形状包在 `attributes_error_response` 里，
+     * 考古 §2.9）。出错的键必须被标成「已同步」，否则 SDK 会每次购买都把它们重传一遍。
+     */
+    val attributeErrors: List<SubscriberAttributeError> = emptyList(),
 ) {
     /**
      * 取本笔交易对应的 `should_consume`。
@@ -52,6 +61,8 @@ internal fun buildPostReceiptResponse(result: HTTPResult): PostReceiptResponse =
         }
     },
     body = result.body,
+    requestId = result.requestId,
+    attributeErrors = result.body.parseAttributeErrors(),
 )
 
 private const val KEY_PURCHASED_PRODUCTS = "purchased_products"
@@ -120,5 +131,6 @@ internal fun PurchasesError.toPurchasePostingError(handling: PostReceiptErrorHan
         underlyingErrorMessage = message,
         backendCode = backendCode,
         httpStatusCode = httpStatusCode,
+        requestId = requestId,
     )
 }

@@ -4,24 +4,36 @@ import org.revdog.purchases.LogLevel
 import org.revdog.purchases.Logger
 
 /**
- * 客户端诊断的记录面。**M1 只有接口 + no-op 实现**，管线（JSONL 队列 / 攒批上传 /
- * 采样 / 退避）是 M3（设计 §9 里程碑 3）。
+ * 客户端诊断的记录面。M3 起真实实现是 [DiagnosticsRecorder]（JSONL 队列 + 攒批上传 + 采样 + 退避），
+ * [NoOpDiagnosticsTracker] 只在 `diagnosticsEnabled = false` 时用。
  *
- * 现在就把接口钉下来的理由：记录点分散在编排、网络、Billing 三层，
- * M3 补管线时不该再去改那些调用点。
+ * **接口与事件名在 M2 就钉死了，M3 只换实现、不改调用点**（`PurchaseDiagnosticsTest` 锁住）：
+ * 记录点分散在编排、网络、Billing 三层，换管线时不该去动那些地方。
  *
- * wire 契约与 iOS 共用 `docs/plan/sdk-diagnostics.md`；Android 额外的 Billing 事件见设计 §2：
- * `billing_connection` · `billing_query` · `billing_purchase_update` · `consume_decision`。
+ * 事件的 `level` **不在调用点传**，由 [DiagnosticsLevels.levelFor] 按 `(name, fields)` 推导
+ * （偏离 iOS：那边每个 `record` 调用显式带 level）。这么做的唯一理由就是上面那条铁律 ——
+ * 给 [track] 加参数会改掉 M2 已经锁死的全部调用点。推导规则集中在一处，单测直接锁它。
+ *
+ * wire 契约与 iOS 共用 `docs/plan/sdk-diagnostics.md`；Android 额外的 Billing 事件见设计 §2。
  *
  * 纪律（与 iOS 逐字一致）：**`error_code` 永远是字符串、永远不带 message**；
- * `app_user_id` 这类可能是宿主 uid 的值不进字段。
+ * purchaseToken / apiKey / 邮箱姓名等一律不进字段；`app_user_id` 由管线逐条填
+ * （**记录那一刻**的身份，`sdk-diagnostics.md` §6-2），调用点不传。
  */
 internal interface DiagnosticsTracker {
 
     fun track(name: String, properties: Map<String, Any?> = emptyMap())
 
+    /**
+     * `sdk_warning` 的统一入口（对照 iOS `DiagnosticsRecorder.warn`）。
+     *
+     * 有默认实现，所以加它不会动到任何既有实现类。
+     */
+    fun warn(code: String, detail: String? = null) {
+        track(EVENT_SDK_WARNING, mapOf("code" to code, "detail" to detail))
+    }
+
     companion object {
-        // M3 会用到的事件名，先钉在这里免得两端各起一套。
         const val EVENT_SDK_CONFIGURED: String = "sdk_configured"
         const val EVENT_DUPLICATE_CONFIGURE: String = "duplicate_configure"
         const val EVENT_IDENTITY_LOGIN: String = "identity_login"
@@ -44,6 +56,13 @@ internal interface DiagnosticsTracker {
         const val EVENT_RESTORE_PURCHASES: String = "restore_purchases"
         const val EVENT_SYNC_PURCHASES: String = "sync_purchases"
 
+        // M3 新增。
+        /** 契约 §1.3 的 `sdk_warning`（`code` 取值见 [DiagnosticsWarningCode]）。 */
+        const val EVENT_SDK_WARNING: String = "sdk_warning"
+
+        /** 属性同步一次尝试的结束（Android 专属；iOS 那边只有 `sdk_warning{attributes_rejected}`）。 */
+        const val EVENT_ATTRIBUTES_SYNC: String = "attributes_sync"
+
         /** [EVENT_PURCHASE_RESULT] 的 outcome 取值。 */
         const val OUTCOME_COMPLETED: String = "completed"
         const val OUTCOME_PENDING: String = "pending"
@@ -58,10 +77,10 @@ internal interface DiagnosticsTracker {
 }
 
 /**
- * `diagnosticsEnabled = false`、或 M1 期间的实现：**什么都不做**。
+ * `diagnosticsEnabled = false` 时的实现：**什么都不做**。
  *
- * 不是空壳 —— 它把事件降级成 VERBOSE 日志，这样 M1 期间在真机上排障仍然看得到记录点，
- * 而 release 构建里被日志级别过滤掉，零开销。
+ * 不是空壳 —— 它把事件降级成 VERBOSE 日志，这样关掉诊断之后在真机上排障仍然看得到记录点，
+ * 而 release 构建里被日志级别过滤掉，**零 I/O、零网络**。
  */
 internal object NoOpDiagnosticsTracker : DiagnosticsTracker {
     override fun track(name: String, properties: Map<String, Any?>) {

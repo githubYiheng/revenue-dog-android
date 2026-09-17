@@ -1,0 +1,55 @@
+{
+  "method": "POST",
+  "path": "\/v1\/receipts",
+  "headers": {
+    "Accept": "application\/json",
+    "Authorization": "<redacted>",
+    "Content-Type": "application\/json",
+    "X-Billing-Client-Sdk-Version": "9.1.0",
+    "X-Is-Backgrounded": "false",
+    "X-Is-Debug-Build": "false",
+    "X-Is-Sandbox": "false",
+    "X-Observer-Mode-Enabled": "false",
+    "X-Platform": "android",
+    "X-Platform-Flavor": "native",
+    "X-Version": "0.1.0"
+  },
+  "body": {
+    "fetch_token": "token-sub",
+    "app_user_id": "user-42",
+    "product_ids": [
+      "sub_premium"
+    ],
+    "platform_product_ids": [
+      {
+        "product_id": "sub_premium",
+        "base_plan_id": "monthly-base"
+      }
+    ],
+    "is_restore": false,
+    "initiation_source": "purchase",
+    "observer_mode": false,
+    "purchase_completed_by": "revenue_dog",
+    "sdk_originated": true,
+    "payload_version": 1,
+    "price_amount_micros": 4990000,
+    "currency": "USD",
+    "price_string": "$4.99",
+    "normal_duration": "P1M",
+    "pricing_phases": [
+      {
+        "billingPeriod": "P1M",
+        "recurrenceMode": 1,
+        "formattedPrice": "$4.99",
+        "priceAmountMicros": 4990000,
+        "priceCurrencyCode": "USD"
+      }
+    ],
+    "attributes": {
+      "$email": {
+        "value": "a@b.c",
+        "updated_at_ms": 1789000000000
+      }
+    }
+  }
+}

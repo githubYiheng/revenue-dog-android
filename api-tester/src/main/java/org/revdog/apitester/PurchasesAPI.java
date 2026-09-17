@@ -503,6 +503,62 @@ final class PurchasesAPI {
         ReplacementMode replacementMode = transaction.getReplacementMode();
     }
 
+    /** M3：订阅者属性 setter 全集 + 诊断开关（Java 侧 —— 缺 @JvmOverloads / @JvmField 会在这里炸掉）。 */
+    static void checkAttributes(Purchases purchases) {
+        Map<String, String> attributes = new java.util.HashMap<>();
+        attributes.put("favorite_food", "pizza");
+        attributes.put("tombstone", null);
+        purchases.setAttributes(attributes);
+        purchases.collectDeviceIdentifiers();
+        purchases.syncAttributes();
+
+        purchases.setEmail("a@b.c");
+        purchases.setEmail(null);
+        purchases.setPhoneNumber("+15550000000");
+        purchases.setDisplayName("Ada");
+        purchases.setPushToken("fcm-token");
+        purchases.setFCMToken("fcm-token");
+        purchases.setAPNSToken("apns-token");
+        purchases.setATTConsentStatus("authorized");
+        purchases.setIDFA("idfa");
+        purchases.setIDFV("idfv");
+        purchases.setAppleRefundHandlingPreference("CUSTOMER_SUPPORT");
+        purchases.setGPSAdID("gps-ad-id");
+        purchases.setAndroidID("android-id");
+        purchases.setAmazonAdID("amazon-ad-id");
+        purchases.setIP("true");
+        purchases.setDeviceVersion("true");
+        purchases.setAdjustID("adjust");
+        purchases.setAmplitudeDeviceID("amplitude-device");
+        purchases.setAmplitudeUserID("amplitude-user");
+        purchases.setAppsflyerID("appsflyer");
+        purchases.setAppstackID("appstack");
+        purchases.setBrazeAliasName("braze-name");
+        purchases.setBrazeAliasLabel("braze-label");
+        purchases.setCleverTapID("clevertap");
+        purchases.setCustomerioID("customerio");
+        purchases.setFBAnonymousID("fb-anon");
+        purchases.setFirebaseAppInstanceID("firebase");
+        purchases.setKochavaDeviceID("kochava");
+        purchases.setMixpanelDistinctID("mixpanel");
+        purchases.setMparticleID("mparticle");
+        purchases.setOnesignalID("onesignal");
+        purchases.setAirshipChannelID("airship");
+        purchases.setIterableUserID("iterable-user");
+        purchases.setIterableCampaignID("iterable-campaign");
+        purchases.setIterableTemplateID("iterable-template");
+        purchases.setPostHogUserID("posthog");
+        purchases.setTenjinID("tenjin");
+        purchases.setMediaSource("media");
+        purchases.setCampaign("campaign");
+        purchases.setAdGroup("ad-group");
+        purchases.setAd("ad");
+        purchases.setKeyword("keyword");
+        purchases.setCreative("creative");
+
+        boolean diagnosticsEnabled = purchases.getDiagnosticsEnabled();
+    }
+
     static void checkPurchaseState() {
         List<PurchaseState> states = PurchaseState.ALL;
         PurchaseState[] all = new PurchaseState[]{

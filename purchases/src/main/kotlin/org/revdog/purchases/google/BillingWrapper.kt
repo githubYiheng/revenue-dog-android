@@ -835,6 +835,15 @@ internal class BillingWrapper(
         const val DECISION_OBSERVER_LEDGER_ONLY: String = "observer_mode_ledger_only"
         const val DECISION_MISSING_SHOULD_CONSUME: String = "missing_should_consume"
         const val DECISION_SKIPPED_NOT_PURCHASED: String = "skipped_not_purchased"
+
+        /**
+         * A8 超时自保 ack（设计 §3 A8）：首次上报起 24h 仍未成功 → 先 ack 再继续补报。
+         * 判定与执行在 `PostReceiptHelper`，取值放这里是为了与其它 decision 同源。
+         */
+        const val DECISION_ACK_SELF_PROTECT: String = "ack_self_protect"
+
+        /** A8 的另一半：查回来发现服务端已经 ack 过了 → 只标记，不再 ack。 */
+        const val DECISION_ACK_SELF_PROTECT_ALREADY_ACKED: String = "ack_self_protect_already_acknowledged"
     }
 }
 

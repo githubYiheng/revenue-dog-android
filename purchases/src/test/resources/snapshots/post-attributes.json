@@ -1,0 +1,24 @@
+{
+  "method": "POST",
+  "path": "\/v1\/subscribers\/user-42\/attributes",
+  "headers": {
+    "Accept": "application\/json",
+    "Authorization": "<redacted>",
+    "Content-Type": "application\/json",
+    "X-Billing-Client-Sdk-Version": "9.1.0",
+    "X-Is-Backgrounded": "false",
+    "X-Is-Debug-Build": "false",
+    "X-Is-Sandbox": "false",
+    "X-Observer-Mode-Enabled": "false",
+    "X-Platform-Flavor": "native",
+    "X-Version": "0.1.0"
+  },
+  "body": {
+    "attributes": {
+      "food": {
+        "value": "pizza",
+        "updated_at_ms": 1789000000000
+      }
+    }
+  }
+}
