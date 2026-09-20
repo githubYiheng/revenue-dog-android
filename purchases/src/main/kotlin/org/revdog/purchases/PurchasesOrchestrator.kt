@@ -749,17 +749,25 @@ internal class PurchasesOrchestrator(
      */
     private fun handlePurchasesFailedToUpdate(error: PurchasesError, userCancelled: Boolean) {
         val callbacks = pendingPurchases.takeAllCallbacksAndClearLaunched()
-        diagnostics.track(
-            DiagnosticsTracker.EVENT_PURCHASE_RESULT,
-            mapOf(
-                "outcome" to if (userCancelled) {
-                    DiagnosticsTracker.OUTCOME_CANCELLED
-                } else {
-                    DiagnosticsTracker.OUTCOME_FAILED
-                },
-                "error_code" to error.code.name,
-            ),
-        )
+        // 没有任何一笔购买在途时**不记 `purchase_result`**：Play 会在订阅状态变化等时刻凭空推一次
+        // 「OK + null purchases」（坑 17 按 ERROR 处理），2026-09-20 真机 21:15 就收到过 —— 那一刻没有人在买东西，
+        // 记成 `purchase_result{failed}`（error 级）只会污染购买成功率。Billing 层的 `billing_purchase_update`
+        // 已经如实留痕了这次回调。
+        if (callbacks.isNotEmpty()) {
+            diagnostics.track(
+                DiagnosticsTracker.EVENT_PURCHASE_RESULT,
+                mapOf(
+                    "outcome" to if (userCancelled) {
+                        DiagnosticsTracker.OUTCOME_CANCELLED
+                    } else {
+                        DiagnosticsTracker.OUTCOME_FAILED
+                    },
+                    "error_code" to error.code.name,
+                ),
+            )
+        } else {
+            Logger.debug { "收到购买失败回调但没有在途购买，忽略：$error" }
+        }
         if (error.code == PurchasesErrorCode.ProductAlreadyPurchasedError) {
             Logger.warn { "Play 说这笔已经拥有了，触发一轮补报把它找回来" }
             syncPendingPurchaseQueue()

@@ -110,6 +110,13 @@ class PurchaseDiagnosticsTest {
     }
 
     @Test
+    fun `没有在途购买时收到失败回调 —— 不记 purchase_result（Play 会凭空推 OK 加 null purchases）`() {
+        billing.deliverPurchaseFailure(PurchasesError(PurchasesErrorCode.StoreProblemError), userCancelled = false)
+
+        assertThat(harness.diagnostics.named(DiagnosticsTracker.EVENT_PURCHASE_RESULT)).isEmpty()
+    }
+
+    @Test
     fun `M2 的事件名全集都在 DiagnosticsTracker 的常量里（restore 与 sync 在 M4 与 iOS 对名）`() {
         assertThat(
             listOf(
