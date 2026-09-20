@@ -54,6 +54,7 @@ import org.revdog.purchases.posting.PostTransactionsHelper
 import org.revdog.purchases.posting.ReceiptInfo
 import java.util.UUID
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * 唯一编排入口。结构对照 RC `PurchasesOrchestrator.kt`。
@@ -96,21 +97,53 @@ internal class PurchasesOrchestrator(
     /** `distinctUntilChanged`：与 listener 那条通道同口径的去重（相同状态不重复发）。 */
     val customerInfoFlow: Flow<CustomerInfo> = customerInfoMutableFlow.asSharedFlow().distinctUntilChanged()
 
-    private val lifecycleObserver = object : DefaultLifecycleObserver {
-        override fun onStart(owner: LifecycleOwner) {
-            setAppBackgrounded(false)
-            // 前台恢复是补报的两个触发点之一（考古 §3.4）。
-            syncPendingPurchaseQueue()
-            // 属性同步时机之一（设计 §5）：回前台。
-            syncAttributes()
-        }
+    /** 进程内第一次回前台（RC `state.firstTimeInForeground`）：那一次无条件刷新 CustomerInfo。 */
+    private val firstTimeInForeground = AtomicBoolean(true)
 
-        override fun onStop(owner: LifecycleOwner) {
-            setAppBackgrounded(true)
-            // 进后台：属性与诊断都要在进程可能被冻结之前冲一次。
-            syncAttributes()
-            diagnosticsRecorder?.onAppBackgrounded()
-        }
+    private val lifecycleObserver = object : DefaultLifecycleObserver {
+        override fun onStart(owner: LifecycleOwner) = onAppForegrounded()
+
+        override fun onStop(owner: LifecycleOwner) = onAppBackgrounded()
+    }
+
+    /**
+     * 回前台（结构对照 RC `PurchasesOrchestrator.onAppForegrounded`）。
+     *
+     * **CustomerInfo 刷新**（2026-09-20 真机发现缺这一步后补上）：进程内首次回前台无条件拉一次，
+     * 之后只在缓存过期（前台 5 分钟）时拉 —— 与 RC `shouldRefreshCustomerInfo` 同口径。没有它，
+     * 只靠 `UpdatedCustomerInfoListener` / `customerInfoFlow` 判权益的宿主（RC 官方推荐写法之一）
+     * 冷启后拿到的永远是盘上那份旧快照：已过期的订阅继续放行，别的设备上买的也进不来。
+     * 失败只记日志与诊断、不打扰宿主（RC 同款）；成功经 `cacheAndNotifyListeners` 推给 listener。
+     */
+    internal fun onAppForegrounded() {
+        val firstTime = firstTimeInForeground.getAndSet(false)
+        setAppBackgrounded(false)
+        refreshCustomerInfoOnForeground(firstTime)
+        // 前台恢复是补报的两个触发点之一（考古 §3.4）。
+        syncPendingPurchaseQueue()
+        // 属性同步时机之一（设计 §5）：回前台。
+        syncAttributes()
+    }
+
+    internal fun onAppBackgrounded() {
+        setAppBackgrounded(true)
+        // 进后台：属性与诊断都要在进程可能被冻结之前冲一次。
+        syncAttributes()
+        diagnosticsRecorder?.onAppBackgrounded()
+    }
+
+    private fun refreshCustomerInfoOnForeground(firstTime: Boolean) {
+        // 首次：强拉；其余：未过期就用缓存（不发请求、不重复推 listener），过期才拉。
+        val policy = if (firstTime) CacheFetchPolicy.FETCH_CURRENT else CacheFetchPolicy.NOT_STALE_CACHED_OR_CURRENT
+        getCustomerInfo(
+            policy,
+            object : ReceiveCustomerInfoCallback {
+                override fun onReceived(customerInfo: CustomerInfo) = Unit
+                override fun onError(error: PurchasesError) {
+                    Logger.warn { "回前台刷新 CustomerInfo 失败（沿用缓存）：$error" }
+                }
+            },
+        )
     }
 
     init {
