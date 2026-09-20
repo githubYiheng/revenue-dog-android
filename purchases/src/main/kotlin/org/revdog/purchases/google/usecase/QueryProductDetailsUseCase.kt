@@ -69,9 +69,13 @@ internal class QueryProductDetailsUseCase(
 
         // `unfetchedProductList`（PBL 8 新增）带 statusCode，是**「为什么这个商品查不到」的唯一线索**。
         // 每一条都要落日志（M3 会把它们送进 `billing_query` 诊断事件）。
+        // 日志必须带上**这一次查的是哪个 type**：同一批 id 会按 SUBS / INAPP 各查一次（考古 §3.8），
+        // 订阅在 INAPP 那次里必然 PRODUCT_NOT_FOUND（反之亦然），不写 type 会被读成「订阅也查不到」
+        // （2026-09-20 真机排障两次被它误导）。真正「两次都没查到」的清单看 offerings 那条 warn。
+        val queriedType = useCaseParams.productType
         val unfetchedProductIds = received.unfetchedProductList.map { unfetched ->
             Logger.info {
-                "商品未返回：${unfetched.productId}（${statusCodeName(unfetched.statusCode)}）"
+                "商品未返回（$queriedType 查询）：${unfetched.productId}（${statusCodeName(unfetched.statusCode)}）"
             }
             unfetched.productId
         }
