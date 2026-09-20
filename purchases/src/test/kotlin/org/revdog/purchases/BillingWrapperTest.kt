@@ -5,6 +5,8 @@ import android.os.Handler
 import android.os.Looper
 import androidx.test.core.app.ApplicationProvider
 import com.android.billingclient.api.BillingClient
+import io.mockk.every
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.Before
 import org.junit.Test
@@ -125,6 +127,41 @@ class BillingWrapperTest {
         idleMain()
         // 坑 4：在这里重连会与退避逻辑打架。真正的重连靠 setupFinished 的错误分支 + 懒重连。
         assertThat(runner.scheduledDelays).isEmpty()
+    }
+
+    @Test
+    fun `连接进行中时懒重连不再发第二次 startConnection —— 真机冷启 DEVELOPER_ERROR`() {
+        // configure 的首次连接已发出、回调还没到：PBL 此时处于 CONNECTING。
+        buildClient(ready = false)
+        every { fixture.billingClient.connectionState } returns BillingClient.ConnectionState.CONNECTING
+
+        // 「补报待同步购买」这类请求进队并触发懒重连。
+        var executed = 0
+        wrapper.executeRequestOnUIThread { executed++ }
+        runner.runPending()
+
+        // 只有 buildClient 里的那一次；第二次会被 PBL 以 DEVELOPER_ERROR 打回。
+        verify(exactly = 1) { fixture.billingClient.startConnection(any()) }
+        assertThat(wrapper.pendingRequestCount()).isEqualTo(1)
+
+        // 在途的那次连接回来之后，待办照常排空。
+        every { fixture.billingClient.connectionState } returns BillingClient.ConnectionState.CONNECTED
+        fixture.setReady(true)
+        wrapper.onBillingSetupFinished(FakeBillingClientFixture.ok())
+        idleMain()
+        assertThat(executed).isEqualTo(1)
+        assertThat(wrapper.pendingRequestCount()).isEqualTo(0)
+    }
+
+    @Test
+    fun `连接已断开（DISCONNECTED）时懒重连照常发起`() {
+        buildClient(ready = false)
+        every { fixture.billingClient.connectionState } returns BillingClient.ConnectionState.DISCONNECTED
+
+        wrapper.executeRequestOnUIThread { }
+        runner.runPending()
+
+        verify(exactly = 2) { fixture.billingClient.startConnection(any()) }
     }
 
     // endregion

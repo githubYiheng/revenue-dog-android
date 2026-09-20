@@ -199,7 +199,12 @@ internal class BillingWrapper(
                     billingClient = clientFactory.buildClient(this)
                 }
                 reconnectionAlreadyScheduled = false
-                billingClient?.takeIf { !it.isReady }
+                // **偏离 RC**（RC 只判 `!isReady`）：连接进行中不再发第二次。2026-09-20 真机每次冷启都复现 ——
+                // `configure` 的首次连接还没回来，「补报待同步购买」经 `executeRequestOnUIThread` 的懒重连
+                // 又排了一次；PBL 对 CONNECTING 状态下的 `startConnection` 直接回 DEVELOPER_ERROR
+                // （"Client is already in the process of connecting"）后返回，什么都不做。跳过它行为等价，
+                // 只少一次无效 IPC 与一条误导性的告警日志；待办队列照旧由那次在途连接的回调排空。
+                billingClient?.takeIf { !it.isReady && it.connectionState != BillingClient.ConnectionState.CONNECTING }
             } ?: return
 
             Logger.debug { "BillingClient 开始连接" }
