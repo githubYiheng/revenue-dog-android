@@ -366,7 +366,7 @@ public class Purchases private constructor(
                 Logger.warn { "Purchases 已经 configure 过了，用新配置替换旧实例" }
                 existing.orchestrator.close()
             }
-            val purchases = Purchases(PurchasesOrchestrator.create(configuration), configuration)
+            val purchases = Purchases(PurchasesFactory.create(configuration), configuration)
             instance = purchases
             purchases
         }

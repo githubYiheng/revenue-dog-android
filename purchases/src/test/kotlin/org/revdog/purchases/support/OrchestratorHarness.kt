@@ -43,7 +43,7 @@ internal class RecordingDiagnosticsTracker : DiagnosticsTracker {
  * 真实 [PurchasesOrchestrator] + 真实 `Backend` / `PostReceiptHelper` / `PendingPurchaseStore`
  * + 假后端（[FakeHTTPClient]）+ 可编程 Billing（[BillingHarness]）。
  *
- * 装配逻辑与生产的 `PurchasesOrchestrator.create` 一一对应，只换掉两处：
+ * 装配逻辑与生产的 `PurchasesFactory.create` 一一对应，只换掉两处：
  * Billing 层（换成替身）与进程生命周期观察者（关掉 —— 单测里 `ProcessLifecycleOwner`
  * 的 onStart 会在不确定的时刻多跑一轮补报，把断言搅乱）。
  *
