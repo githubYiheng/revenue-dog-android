@@ -48,12 +48,14 @@ bash scripts/r8-check.sh
 真机手测一律用 `installDebug`。要在真机上验 R8 后的行为（Play Billing 的 IPC 回调在 minify 之后
 仍然打得通），按真机清单 §0 的说明自己给一个 debug 签名再装 release apk。
 
-## UI 上的八个动作
+## UI 上的动作
 
 | 按钮 | 调的 API | 真机清单里对应哪条 |
 |---|---|---|
 | offerings | `getOfferingsWith` | D1 商品与价格展示、`platform_product_plan_identifier` |
 | purchase | `purchaseWith(PurchaseParams.Builder(activity, package))` | D2–D6 购买 / pending / 升降级 |
+| 逐 package 购买（一个 package 一个按钮） | 同上，`package` 是点中的那个 | D3 一次性商品（`coins_100` / `$rc_lifetime`）、D6 换 base plan |
+| 替换模式选择器 | `PurchaseParams.Builder.oldProductId(…).replacementMode(…)` | D6 升级 / 降级 / 换套餐 |
 | restore | `restorePurchasesWith` | D8 重装恢复、D9 换账号 |
 | sync | `syncPurchasesWith` | D10 只上报不碰 Billing |
 | customerInfo | `getCustomerInfoWith(FETCH_CURRENT)` | D11 权益判定与 grace |
@@ -63,6 +65,17 @@ bash scripts/r8-check.sh
 
 诊断开关是 **configure 期**决定的，所以改完要杀进程重启才生效（UI 上也写了这句）。
 关掉之后 SDK 会清空本地队列目录 —— 那正是 D13 要看的一条。
+
+**逐 package 按钮**在每次 `offerings` 成功后整片重建（不累加），current offering 里有几个 package
+就有几个按钮，文案是「package identifier / 商品 id / 价格」。Play 上查不到的 package
+（`Offerings.notFoundProductIds` 里的那些）也画出来，但**置灰并写明「商店里查不到」**——
+按钮凭空少一个远比一个灰按钮难排查。
+
+**替换模式选择器**列的是 `ReplacementMode.ALL`（SDK 公开支持的全部五种），默认停在
+「不替换（全新购买）」。选了某一种之后，购买参数才会带上 `oldProductId` + `replacementMode`；
+**被替换的旧订阅只从最近一次 customerInfo 的活跃订阅里取**（`activeSubscriptions` ∩ `subscriptions`
+里 `store == play_store` 的那笔），取不到就在日志区写明原因并按全新购买走 —— 不拿 offerings
+里的某个订阅顶上，猜错的后果是给用户换错套餐。所以跑 D6 前先点一次 `customerInfo`。
 
 ## 不做的事
 
