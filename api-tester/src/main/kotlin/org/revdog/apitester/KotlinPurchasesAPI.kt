@@ -6,6 +6,7 @@ import android.app.Activity
 import android.content.Context
 import kotlinx.coroutines.flow.Flow
 import org.revdog.purchases.CacheFetchPolicy
+import org.revdog.purchases.InAppMessageType
 import org.revdog.purchases.LogInCallback
 import org.revdog.purchases.LogInResult
 import org.revdog.purchases.LogLevel
@@ -76,6 +77,7 @@ internal object KotlinPurchasesAPI {
             .logLevel(LogLevel.INFO)
             .baseURL(PurchasesConfiguration.DEFAULT_BASE_URL)
             .pendingTransactionsForPrepaidPlansEnabled(false)
+            .showInAppMessagesAutomatically(true)
             .build()
 
         val ctx: Context = configuration.context
@@ -86,6 +88,7 @@ internal object KotlinPurchasesAPI {
         val level: LogLevel = configuration.logLevel
         val baseURL: String = configuration.baseURL
         val prepaid: Boolean = configuration.pendingTransactionsForPrepaidPlansEnabled
+        val autoInAppMessages: Boolean = configuration.showInAppMessagesAutomatically
 
         val purchases: Purchases = Purchases.configure(configuration)
         val configured: Boolean = Purchases.isConfigured
@@ -421,6 +424,15 @@ internal object KotlinPurchasesAPI {
         )
         purchases.syncPurchasesWith { }
         purchases.syncPurchasesWith(onError = { }) { }
+    }
+
+    fun checkInAppMessages(purchases: Purchases, activity: Activity) {
+        purchases.showInAppMessagesIfNeeded(activity)
+        purchases.showInAppMessagesIfNeeded(activity, InAppMessageType.ALL)
+        purchases.showInAppMessagesIfNeeded(activity, listOf(InAppMessageType.BILLING_ISSUES))
+
+        val name: String = InAppMessageType.BILLING_ISSUES.name
+        val all: List<InAppMessageType> = InAppMessageType.ALL
     }
 
     fun checkPurchaseResult(result: PurchaseResult) {

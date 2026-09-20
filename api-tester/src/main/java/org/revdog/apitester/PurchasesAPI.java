@@ -5,6 +5,7 @@ import android.content.Context;
 import android.net.Uri;
 
 import org.revdog.purchases.CacheFetchPolicy;
+import org.revdog.purchases.InAppMessageType;
 import org.revdog.purchases.LogInCallback;
 import org.revdog.purchases.LogLevel;
 import org.revdog.purchases.OwnershipType;
@@ -42,6 +43,7 @@ import org.revdog.purchases.offerings.Offerings;
 import org.revdog.purchases.offerings.Package;
 import org.revdog.purchases.offerings.PackageType;
 
+import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
@@ -67,6 +69,7 @@ final class PurchasesAPI {
                 .logLevel(LogLevel.INFO)
                 .baseURL(PurchasesConfiguration.DEFAULT_BASE_URL)
                 .pendingTransactionsForPrepaidPlansEnabled(false)
+                .showInAppMessagesAutomatically(true)
                 .build();
 
         Context ctx = configuration.getContext();
@@ -77,6 +80,7 @@ final class PurchasesAPI {
         LogLevel level = configuration.getLogLevel();
         String baseURL = configuration.getBaseURL();
         boolean prepaid = configuration.getPendingTransactionsForPrepaidPlansEnabled();
+        boolean autoInAppMessages = configuration.getShowInAppMessagesAutomatically();
 
         Purchases purchases = Purchases.configure(configuration);
         boolean configured = Purchases.isConfigured();
@@ -478,6 +482,17 @@ final class PurchasesAPI {
             @Override
             public void onError(PurchasesError error) { }
         });
+    }
+
+    // `@JvmOverloads` 漏了的话，下面第一行（只传 activity）编译不过。
+    static void checkInAppMessages(Purchases purchases, Activity activity) {
+        purchases.showInAppMessagesIfNeeded(activity);
+        purchases.showInAppMessagesIfNeeded(activity, InAppMessageType.ALL);
+        purchases.showInAppMessagesIfNeeded(
+                activity, Collections.singletonList(InAppMessageType.BILLING_ISSUES));
+
+        String name = InAppMessageType.BILLING_ISSUES.getName();
+        List<InAppMessageType> all = InAppMessageType.ALL;
     }
 
     static void checkPurchaseResult(PurchaseResult result) {

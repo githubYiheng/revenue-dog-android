@@ -46,6 +46,8 @@ internal class AppConfig(
     val store: Store = Store.PLAY_STORE,
     val isDebugBuild: Boolean,
     val diagnosticsEnabled: Boolean,
+    /** 每个 Activity 的 `onStart` 自动展示 Play in-app message（对照 RC `AppConfig.showInAppMessagesAutomatically`）。 */
+    val showInAppMessagesAutomatically: Boolean = true,
 ) {
 
     /**

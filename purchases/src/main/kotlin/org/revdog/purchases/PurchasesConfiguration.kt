@@ -42,6 +42,9 @@ public class PurchasesConfiguration internal constructor(builder: Builder) {
      */
     public val pendingTransactionsForPrepaidPlansEnabled: Boolean = builder.pendingTransactionsForPrepaidPlansEnabled
 
+    /** 自动展示 Play in-app message。默认**开**（与 RC 一致）。 */
+    public val showInAppMessagesAutomatically: Boolean = builder.showInAppMessagesAutomatically
+
     /** **仅测试用**：替换整个 HTTP 层。生产路径永远为 `null`。 */
     internal val httpClientOverride: HTTPClient? = builder.httpClientOverride
 
@@ -76,10 +79,14 @@ public class PurchasesConfiguration internal constructor(builder: Builder) {
             diagnosticsEnabled == other.diagnosticsEnabled &&
             baseURL == other.baseURL &&
             pendingTransactionsForPrepaidPlansEnabled == other.pendingTransactionsForPrepaidPlansEnabled &&
+            showInAppMessagesAutomatically == other.showInAppMessagesAutomatically &&
             httpClientOverride === other.httpClientOverride &&
             dispatcherOverride === other.dispatcherOverride &&
             billingOverride === other.billingOverride
 
+    // 一个配置项一个 setter，这就是 Builder 的全部内容（RC 的同名 Builder 有 15 个）。
+    // 拆成两个 Builder 只会让宿主要记住两个入口。
+    @Suppress("TooManyFunctions")
     public class Builder(
         internal val context: Context,
         internal val apiKey: String,
@@ -96,6 +103,8 @@ public class PurchasesConfiguration internal constructor(builder: Builder) {
         internal var baseURL: String = DEFAULT_BASE_URL
             private set
         internal var pendingTransactionsForPrepaidPlansEnabled: Boolean = false
+            private set
+        internal var showInAppMessagesAutomatically: Boolean = true
             private set
         internal var httpClientOverride: HTTPClient? = null
             private set
@@ -126,6 +135,16 @@ public class PurchasesConfiguration internal constructor(builder: Builder) {
 
         public fun pendingTransactionsForPrepaidPlansEnabled(enabled: Boolean): Builder =
             apply { this.pendingTransactionsForPrepaidPlansEnabled = enabled }
+
+        /**
+         * 自动展示 Play in-app message（扣款失败的官方挽回 snackbar）。**默认开**（与 RC 一致）。
+         *
+         * 开着时 SDK 注册 `Application.ActivityLifecycleCallbacks`，在每个 Activity 的
+         * `onStart` 调一次 [Purchases.showInAppMessagesIfNeeded]。
+         * 关掉之后由宿主自己挑时机调那个方法 —— 关掉且不调 = 扣款失败的用户永远收不到提示。
+         */
+        public fun showInAppMessagesAutomatically(enabled: Boolean): Builder =
+            apply { this.showInAppMessagesAutomatically = enabled }
 
         /** **仅测试用**（internal）：注入假后端。 */
         internal fun httpClientOverride(client: HTTPClient?): Builder = apply { this.httpClientOverride = client }

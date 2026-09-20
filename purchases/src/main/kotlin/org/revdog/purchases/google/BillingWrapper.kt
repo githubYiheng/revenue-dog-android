@@ -12,9 +12,12 @@ import com.android.billingclient.api.BillingClientStateListener
 import com.android.billingclient.api.BillingFlowParams
 import com.android.billingclient.api.BillingFlowParams.ProductDetailsParams.SubscriptionProductReplacementParams
 import com.android.billingclient.api.BillingResult
+import com.android.billingclient.api.InAppMessageParams
+import com.android.billingclient.api.InAppMessageResult
 import com.android.billingclient.api.PendingPurchasesParams
 import com.android.billingclient.api.Purchase
 import com.android.billingclient.api.PurchasesUpdatedListener
+import org.revdog.purchases.InAppMessageType
 import org.revdog.purchases.Logger
 import org.revdog.purchases.PendingPurchaseKey
 import org.revdog.purchases.ProductType
@@ -41,6 +44,7 @@ import org.revdog.purchases.google.usecase.QueryPurchasesUseCase
 import org.revdog.purchases.google.usecase.QueryPurchasesUseCaseParams
 import org.revdog.purchases.models.PurchaseState
 import org.revdog.purchases.models.StoreTransaction
+import java.lang.ref.WeakReference
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicInteger
@@ -511,6 +515,80 @@ internal class BillingWrapper(
 
     // endregion
 
+    // region Play in-app messages
+
+    /**
+     * 展示 Play in-app message（订阅扣款失败时 Google 官方的挽回 snackbar）。
+     * 结构对照 RC `google/BillingWrapper.showInAppMessagesIfNeeded:779-846`，逐条照搬：
+     *
+     * - 类别列表为空 → **直接返回**（宿主传错了，展示不出任何东西）；
+     * - 经 [executeRequestOnUIThread] 排队：没连上就先连，连上了再在**主线程**跑
+     *   （`showInAppMessages` 要挂 snackbar 到 Activity 的 window 上，必须主线程）；
+     * - Activity 用 [WeakReference] 持有：排队期间用户可能已经退出那个页面，
+     *   强引用会把整个 Activity 拖到连接成功为止；
+     * - 拿回来的 Activity 已经 finishing / destroyed / 还没 attach 到 window → 跳过并记 debug，
+     *   **不报错**（这是正常的竞态，不是故障）；
+     * - `showInAppMessages` 本身会抛 `RuntimeException`（RC 实测），兜住只记日志。
+     *
+     * 结果两态：`NO_ACTION_NEEDED` 只记 debug；`SUBSCRIPTION_STATUS_UPDATED` =
+     * 用户在 snackbar 里把订阅救回来了，回调 [subscriptionStatusChange] 让上层补一次同步。
+     */
+    fun showInAppMessagesIfNeeded(
+        activity: Activity,
+        inAppMessageTypes: List<InAppMessageType>,
+        subscriptionStatusChange: () -> Unit,
+    ) {
+        if (inAppMessageTypes.isEmpty()) {
+            Logger.error { "showInAppMessagesIfNeeded 没有指定任何类别，什么都不会展示（请传 InAppMessageType.ALL）" }
+            return
+        }
+
+        val params = InAppMessageParams.newBuilder()
+            .apply { inAppMessageCategoryIds(inAppMessageTypes).forEach { addInAppMessageCategoryToShow(it) } }
+            .build()
+        val weakActivity = WeakReference(activity)
+
+        executeRequestOnUIThread { connectionError ->
+            if (connectionError != null) {
+                Logger.error { "连接 BillingClient 失败，Play in-app message 未展示：$connectionError" }
+                return@executeRequestOnUIThread
+            }
+            billingClient.withConnectedClientOrWarn {
+                val current = weakActivity.get()
+                if (current == null || current.isFinishing || current.isDestroyed) {
+                    Logger.debug { "Activity 已销毁或正在结束，跳过 Play in-app message" }
+                    return@withConnectedClientOrWarn
+                }
+                if (current.window?.peekDecorView()?.windowToken == null) {
+                    Logger.debug { "Activity 还没 attach 到 window，跳过 Play in-app message" }
+                    return@withConnectedClientOrWarn
+                }
+                runCatching {
+                    showInAppMessages(current, params) { result ->
+                        handleInAppMessageResult(result, subscriptionStatusChange)
+                    }
+                }.onFailure { Logger.error(it) { "展示 Play in-app message 失败：${it.message}" } }
+            }
+        }
+    }
+
+    /** 拆出来的结果处置：`showInAppMessagesIfNeeded` 已经四层嵌套，再塞一个 when 就读不动了。 */
+    private fun handleInAppMessageResult(result: InAppMessageResult, subscriptionStatusChange: () -> Unit) {
+        when (result.responseCode) {
+            InAppMessageResult.InAppMessageResponseCode.NO_ACTION_NEEDED ->
+                Logger.debug { "没有可展示的 Play in-app message" }
+
+            InAppMessageResult.InAppMessageResponseCode.SUBSCRIPTION_STATUS_UPDATED -> {
+                Logger.debug { "用户在 Play in-app message 里更新了订阅状态，触发一次同步" }
+                subscriptionStatusChange()
+            }
+
+            else -> Logger.error { "Play in-app message 返回了意料之外的响应码：${result.responseCode}" }
+        }
+    }
+
+    // endregion
+
     // region 查询已有购买
 
     /**
@@ -866,6 +944,14 @@ internal class BillingWrapper(
  */
 internal fun obfuscatedAccountIdToSend(obfuscatedAccountId: String?, isProductChange: Boolean): String? =
     if (isProductChange) null else obfuscatedAccountId
+
+/**
+ * [InAppMessageType] → Billing 的 category id。
+ *
+ * 抽成独立函数的理由与 [obfuscatedAccountIdToSend] 同：`InAppMessageParams` 拼好之后**读不回来**
+ * （没有 getter，内部那张表是包私有的），类别映射只能这样被单测直接断言。
+ */
+internal fun inAppMessageCategoryIds(types: List<InAppMessageType>): List<Int> = types.map { it.categoryId }
 
 /**
  * 升降级要替换掉的那笔旧购买。结构对照 RC `ReplaceProductInfo`。

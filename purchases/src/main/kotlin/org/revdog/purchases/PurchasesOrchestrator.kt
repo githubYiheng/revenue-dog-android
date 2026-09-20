@@ -1,5 +1,7 @@
 package org.revdog.purchases
 
+import android.app.Activity
+import android.app.Application
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
@@ -65,7 +67,11 @@ import java.util.concurrent.atomic.AtomicBoolean
  * 3. 生命周期观察者最后注册（它的回调里会调 BillingClient）。
  * 4. 连接在后台线程发起（防 ANR）。
  */
-@Suppress("LongParameterList", "TooManyFunctions")
+// `LargeClass`：这个类**就是**「唯一编排入口」（见上），每多一条公开能力它就长一点
+// —— RC 的同名类 2000+ 行。拆成 N 个 manager 只会让「谁在什么时候调了谁」更难追。
+// 真要减，该减的是尾部 140 行的 `create()` 工厂（RC 把它单独放在 `PurchasesFactory.kt`），
+// 那是一次独立的机械搬迁，不该搭在功能切片里。
+@Suppress("LongParameterList", "TooManyFunctions", "LargeClass")
 internal class PurchasesOrchestrator(
     private val appConfig: AppConfig,
     private val identityManager: IdentityManager,
@@ -106,6 +112,26 @@ internal class PurchasesOrchestrator(
         override fun onStart(owner: LifecycleOwner) = onAppForegrounded()
 
         override fun onStop(owner: LifecycleOwner) = onAppBackgrounded()
+    }
+
+    /** [close] 之后一律不再响应 Activity 回调（注销是异步的，已经排队的那一次还会落下来）。 */
+    private val closed = AtomicBoolean(false)
+
+    private val activityLifecycleCallbacks = ActivityStartedHandler { onActivityStarted(it) }
+
+    /**
+     * 每个 Activity 的 `onStart` 自动展示 Play in-app message（对照 RC
+     * `PurchasesOrchestrator.onActivityStarted:412-417`）。
+     *
+     * RC 无条件注册这一组回调、在这里判开关；我方**只在开关为 true 时注册**
+     * （关掉的宿主不该为一个永远早返回的回调付出每次 Activity 启动的分发成本），
+     * 里面那道开关守卫照样留着：单测直接驱动本方法，
+     * 「开关关了就是不展示」这件事不该依赖注册路径。
+     */
+    @VisibleForTesting
+    internal fun onActivityStarted(activity: Activity) {
+        if (closed.get() || !appConfig.showInAppMessagesAutomatically) return
+        showInAppMessagesIfNeeded(activity, InAppMessageType.ALL)
     }
 
     /**
@@ -190,6 +216,21 @@ internal class PurchasesOrchestrator(
             mainDispatcher.dispatch {
                 runCatching { ProcessLifecycleOwner.get().lifecycle.addObserver(lifecycleObserver) }
                     .onFailure { Logger.warn { "注册进程生命周期观察者失败，前台补报改为只靠 onConnected：$it" } }
+            }
+        }
+
+        // ③' Activity 级回调（Play in-app message 的自动展示）。与 ③ 同属「最后注册」，
+        // 但它**不要求主线程**（`registerActivityLifecycleCallbacks` 内部自带锁），
+        // 同步注册可以保证 configure 返回时第一个 Activity 的 onStart 已经能被接住。
+        if (appConfig.showInAppMessagesAutomatically) {
+            val application = appConfig.applicationContext as? Application
+            if (application == null) {
+                Logger.warn {
+                    "applicationContext 不是 Application，Play in-app message 无法自动展示；" +
+                        "请自行在 Activity.onStart 调 Purchases.showInAppMessagesIfNeeded"
+                }
+            } else {
+                application.registerActivityLifecycleCallbacks(activityLifecycleCallbacks)
             }
         }
 
@@ -832,6 +873,31 @@ internal class PurchasesOrchestrator(
     }
 
     /**
+     * 展示 Play in-app message。结构对照 RC `PurchasesOrchestrator.showInAppMessagesIfNeeded:1021-1025`。
+     *
+     * 用户在 snackbar 里把扣款问题修好之后，Play 只告诉我们「状态变了」，不告诉我们变成了什么 ——
+     * 所以**走一遍既有的 [syncPurchases]**（`initiation_source=unsynced_active_purchases`）
+     * 把设备上的活跃购买重新上报一轮，由后端定权益。结果只记日志：
+     * 这不是宿主发起的动作，没有人在等回调；真要用新权益的宿主挂 `updatedCustomerInfoListener`
+     * / `customerInfoFlow` 就行（上报成功会经那条通道推出去）。
+     */
+    fun showInAppMessagesIfNeeded(activity: Activity, inAppMessageTypes: List<InAppMessageType>) {
+        billing.showInAppMessagesIfNeeded(activity, inAppMessageTypes) {
+            syncPurchases(
+                object : ReceiveCustomerInfoCallback {
+                    override fun onReceived(customerInfo: CustomerInfo) {
+                        Logger.debug { "Play in-app message 触发的同步已完成" }
+                    }
+
+                    override fun onError(error: PurchasesError) {
+                        Logger.warn { "Play in-app message 触发的同步失败（下次前台会再试）：$error" }
+                    }
+                },
+            )
+        }
+    }
+
+    /**
      * 把 restore / sync 的**结果**也打进同一个事件（M2 只打了「开始」）。
      *
      * 包一层回调而不是在各分支散打：这两个方法各有三条返回路径（空集 / 成功聚合 / 失败聚合），
@@ -923,6 +989,7 @@ internal class PurchasesOrchestrator(
      * 新实例的补报链路还要靠它把这笔找回来。
      */
     fun close() {
+        closed.set(true)
         pendingPurchases.takeAllCallbacks().forEach { callback ->
             mainDispatcher.dispatch {
                 callback.onError(
@@ -940,6 +1007,12 @@ internal class PurchasesOrchestrator(
                 runCatching { ProcessLifecycleOwner.get().lifecycle.removeObserver(lifecycleObserver) }
             }
         }
+        // 无条件注销（没注册过时是 no-op）。**偏离 RC**：RC 的 `close()` 只摘掉
+        // `ProcessLifecycleOwner` 的观察者，`registerActivityLifecycleCallbacks` 注册的那一组
+        // 从来不摘（`PurchasesOrchestrator.kt:959-976`）—— 换配置重新 configure 之后，
+        // 旧实例会跟着每个 Activity 的 onStart 一直被唤醒，并在一个已经 close 的 BillingClient 上排队。
+        (appConfig.applicationContext as? Application)
+            ?.unregisterActivityLifecycleCallbacks(activityLifecycleCallbacks)
         billing.close()
         backend.close()
         updateHandler.updatedCustomerInfoListener = null
@@ -973,6 +1046,7 @@ internal class PurchasesOrchestrator(
                 purchasesAreCompletedBy = configuration.purchasesCompletedBy,
                 isDebugBuild = context.isDebugBuild(),
                 diagnosticsEnabled = configuration.diagnosticsEnabled,
+                showInAppMessagesAutomatically = configuration.showInAppMessagesAutomatically,
             )
 
             val httpClient = configuration.httpClientOverride

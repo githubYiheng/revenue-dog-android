@@ -4,8 +4,11 @@ import com.android.billingclient.api.AcknowledgePurchaseParams
 import com.android.billingclient.api.AcknowledgePurchaseResponseListener
 import com.android.billingclient.api.BillingClient
 import com.android.billingclient.api.BillingResult
+import android.app.Activity
 import com.android.billingclient.api.ConsumeParams
 import com.android.billingclient.api.ConsumeResponseListener
+import com.android.billingclient.api.InAppMessageResponseListener
+import com.android.billingclient.api.InAppMessageResult
 import com.android.billingclient.api.Purchase
 import com.android.billingclient.api.PurchasesResponseListener
 import com.android.billingclient.api.PurchasesUpdatedListener
@@ -124,6 +127,32 @@ internal class FakeBillingClientFixture {
             queryPurchasesCalls++
             val listener = secondArg<PurchasesResponseListener>()
             listener.onQueryPurchasesResponse(ok(), queryPurchasesResponses.removeFirstOrNull() ?: emptyList())
+        }
+    }
+
+    // endregion
+
+    // region showInAppMessages 的捕获
+
+    /** 每次 `showInAppMessages` 的 Activity 入参（`InAppMessageParams` 读不回来，见 `inAppMessageCategoryIds`）。 */
+    val inAppMessageActivities: MutableList<Activity> = mutableListOf()
+
+    /** 下一次 `showInAppMessages` 回给监听器的响应码。 */
+    var inAppMessageResponseCode: Int = InAppMessageResult.InAppMessageResponseCode.NO_ACTION_NEEDED
+
+    /**
+     * `InAppMessageResult` 只能 mock 出来：它**公开的**构造器 `(int, String)` 在 PBL 9.1 里是个空壳
+     * （字节码里无条件写 `zza = 0` / `zzb = null`，`getResponseCode()` 恒为
+     * `NO_ACTION_NEEDED`），真正带值的那个是私有的。与 `BillingClient` 同款处理（final 类走 inline mock）。
+     */
+    fun stubShowInAppMessages() {
+        every { billingClient.showInAppMessages(any(), any(), any()) } answers {
+            inAppMessageActivities += firstArg<Activity>()
+            val result = mockk<InAppMessageResult> {
+                every { responseCode } returns inAppMessageResponseCode
+            }
+            thirdArg<InAppMessageResponseListener>().onInAppMessageResponse(result)
+            ok()
         }
     }
 

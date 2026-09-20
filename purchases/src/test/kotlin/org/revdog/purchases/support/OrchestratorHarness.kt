@@ -61,6 +61,8 @@ internal class OrchestratorHarness(
     sharedPrefsName: String? = null,
     /** A8 的自保阈值。默认就是生产值（24h），A8 用例传小值。 */
     ackSelfProtectThresholdMs: Long = PostReceiptHelper.ACK_SELF_PROTECT_THRESHOLD_MS,
+    /** Play in-app message 的自动展示开关。默认就是生产默认值（开）。 */
+    showInAppMessagesAutomatically: Boolean = true,
     /**
      * ETag payload 目录。**M4 新增**：默认每个 harness 一个目录（用例之间不串味），
      * 传同一个 [ETagPayloadStore] 可以模拟「进程重启但缓存还在」，
@@ -81,6 +83,7 @@ internal class OrchestratorHarness(
         purchasesAreCompletedBy = purchasesAreCompletedBy,
         isDebugBuild = false,
         diagnosticsEnabled = true,
+        showInAppMessagesAutomatically = showInAppMessagesAutomatically,
     ).apply { isAppBackgrounded = false }
 
     /** ETag 元数据在 package 级 prefs 里，跨 harness 共享 —— 建完先清，用例之间不串味。 */

@@ -1,5 +1,6 @@
 package org.revdog.purchases
 
+import android.app.Activity
 import androidx.annotation.VisibleForTesting
 import kotlinx.coroutines.flow.Flow
 import org.revdog.purchases.attributes.SubscriberAttributeKeys
@@ -169,6 +170,29 @@ public class Purchases private constructor(
      */
     public fun syncPurchases(callback: ReceiveCustomerInfoCallback) {
         orchestrator.syncPurchases(callback)
+    }
+
+    /**
+     * 展示 Play in-app message：用户的订阅续费被拒（卡过期 / 余额不足）时，
+     * Play 会弹一条 snackbar 告诉他并给出修复入口 —— Google 官方的挽回通道。
+     *
+     * **默认不用调**：`PurchasesConfiguration.Builder.showInAppMessagesAutomatically` 默认为 `true`，
+     * SDK 会在每个 Activity 的 `onStart` 自动展示一次。关掉了自动展示的宿主
+     * （想自己挑时机、避开引导页 / 全屏视频）用这个方法手动触发。
+     *
+     * 没有可展示的消息时什么都不会发生。用户在 snackbar 里把订阅救回来之后，
+     * SDK 会自动跑一次 `syncPurchases`，新权益经 `updatedCustomerInfoListener` /
+     * [customerInfoFlow] 推给宿主 —— **本方法本身不回调**。
+     *
+     * @param activity 用来挂 snackbar 的 Activity。排队期间它被销毁的话这次展示会被跳过。
+     * @param inAppMessageTypes 要展示的类别，默认 [InAppMessageType.ALL]。传空列表 = 什么都不展示。
+     */
+    @JvmOverloads
+    public fun showInAppMessagesIfNeeded(
+        activity: Activity,
+        inAppMessageTypes: List<InAppMessageType> = InAppMessageType.ALL,
+    ) {
+        orchestrator.showInAppMessagesIfNeeded(activity, inAppMessageTypes)
     }
 
     // endregion

@@ -13,6 +13,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
+import org.revdog.purchases.InAppMessageType
 import org.revdog.purchases.PurchaseParams
 import org.revdog.purchases.Purchases
 import org.revdog.purchases.PurchasesError
@@ -100,6 +101,7 @@ class MainActivity : Activity() {
         controls.addView(button("logIn") { logIn() })
         controls.addView(button("logOut") { logOut() })
         controls.addView(button("设置订阅者属性 + 立即同步") { setAttributes() })
+        controls.addView(button("showInAppMessages（手动触发）") { showInAppMessages() })
         controls.addView(diagnosticsToggle())
 
         // 控件区与日志区各占半屏、各自滚动：逐 package 按钮一来，按钮总数就超出一屏了。
@@ -349,6 +351,18 @@ class MainActivity : Activity() {
         Purchases.sharedInstance.collectDeviceIdentifiers()
         Purchases.sharedInstance.syncAttributes()
         log("属性已写入并触发同步；端上被拒的键：$rejected")
+    }
+
+    /**
+     * 手动触发 Play in-app message。
+     *
+     * 这个 app **没有**关掉自动展示（`showInAppMessagesAutomatically` 保持默认 `true`），
+     * 所以每次回到本页面 SDK 自己也会展示一次；这个按钮是给「关了自动展示的宿主怎么调」做示范的。
+     * 没有可展示的消息时屏幕上什么都不会发生 —— 这是正常的，不是失败。
+     */
+    private fun showInAppMessages() {
+        Purchases.sharedInstance.showInAppMessagesIfNeeded(this, InAppMessageType.ALL)
+        log("已请求展示 Play in-app message（类别：${InAppMessageType.ALL.map { it.name }}）；没有待展示的消息时不会有任何反应")
     }
 
     // endregion

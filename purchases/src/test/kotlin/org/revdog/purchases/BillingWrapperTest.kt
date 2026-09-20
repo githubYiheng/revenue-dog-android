@@ -1,11 +1,15 @@
 package org.revdog.purchases
 
+import android.app.Activity
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import androidx.test.core.app.ApplicationProvider
 import com.android.billingclient.api.BillingClient
+import com.android.billingclient.api.InAppMessageParams
+import com.android.billingclient.api.InAppMessageResult
 import io.mockk.every
+import io.mockk.mockk
 import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.Before
@@ -16,6 +20,7 @@ import org.revdog.purchases.caching.PendingPurchase
 import org.revdog.purchases.diagnostics.NoOpDiagnosticsTracker
 import org.revdog.purchases.google.BillingWrapper
 import org.revdog.purchases.google.IN_APP_BILLING_LESS_THAN_3_ERROR_MESSAGE
+import org.revdog.purchases.google.inAppMessageCategoryIds
 import org.revdog.purchases.google.PLAY_STORE_BLOCKED_ERROR_MESSAGE_FRAGMENT
 import org.revdog.purchases.google.toSetupError
 import org.revdog.purchases.posting.PlatformProductId
@@ -410,6 +415,127 @@ class BillingWrapperTest {
     fun `isFeatureSupported 在未连接时返回 null（判定不了，不拦购买）`() {
         assertThat(wrapper.isFeatureSupported(BillingClient.FeatureType.SUBSCRIPTIONS_UPDATE)).isNull()
     }
+
+    // endregion
+
+    // region Play in-app messages
+
+    @Test
+    fun `类别映射：BILLING_ISSUES 对应 Billing 的 TRANSACTIONAL`() {
+        // `InAppMessageParams` 拼好之后读不回来，映射只能在这一层断言（同 obfuscatedAccountIdToSend）。
+        assertThat(inAppMessageCategoryIds(InAppMessageType.ALL))
+            .containsExactly(InAppMessageParams.InAppMessageCategoryId.TRANSACTIONAL)
+        assertThat(inAppMessageCategoryIds(emptyList())).isEmpty()
+    }
+
+    @Test
+    fun `已连接时调用 billingClient 的 showInAppMessages`() {
+        connect()
+        fixture.stubShowInAppMessages()
+        val activity = liveActivity()
+
+        wrapper.showInAppMessagesIfNeeded(activity, InAppMessageType.ALL) { }
+        idleMain()
+
+        assertThat(fixture.inAppMessageActivities).containsExactly(activity)
+    }
+
+    @Test
+    fun `SUBSCRIPTION_STATUS_UPDATED 触发上层回调恰好一次`() {
+        connect()
+        fixture.stubShowInAppMessages()
+        fixture.inAppMessageResponseCode = InAppMessageResult.InAppMessageResponseCode.SUBSCRIPTION_STATUS_UPDATED
+        var updates = 0
+
+        wrapper.showInAppMessagesIfNeeded(liveActivity(), InAppMessageType.ALL) { updates++ }
+        idleMain()
+
+        assertThat(updates).isEqualTo(1)
+    }
+
+    @Test
+    fun `NO_ACTION_NEEDED 不触发上层回调`() {
+        connect()
+        fixture.stubShowInAppMessages()
+        fixture.inAppMessageResponseCode = InAppMessageResult.InAppMessageResponseCode.NO_ACTION_NEEDED
+        var updates = 0
+
+        wrapper.showInAppMessagesIfNeeded(liveActivity(), InAppMessageType.ALL) { updates++ }
+        idleMain()
+
+        assertThat(updates).isZero()
+    }
+
+    @Test
+    fun `Activity 已销毁时不展示 —— 排队期间用户可能已经退出那个页面`() {
+        connect()
+        fixture.stubShowInAppMessages()
+        val activity = liveActivity()
+        every { activity.isDestroyed } returns true
+
+        wrapper.showInAppMessagesIfNeeded(activity, InAppMessageType.ALL) { }
+        idleMain()
+
+        assertThat(fixture.inAppMessageActivities).isEmpty()
+    }
+
+    @Test
+    fun `Activity 正在结束时不展示`() {
+        connect()
+        fixture.stubShowInAppMessages()
+        val activity = liveActivity()
+        every { activity.isFinishing } returns true
+
+        wrapper.showInAppMessagesIfNeeded(activity, InAppMessageType.ALL) { }
+        idleMain()
+
+        assertThat(fixture.inAppMessageActivities).isEmpty()
+    }
+
+    @Test
+    fun `Activity 还没 attach 到 window 时不展示`() {
+        connect()
+        fixture.stubShowInAppMessages()
+        val activity = liveActivity()
+        every { activity.window.peekDecorView().windowToken } returns null
+
+        wrapper.showInAppMessagesIfNeeded(activity, InAppMessageType.ALL) { }
+        idleMain()
+
+        assertThat(fixture.inAppMessageActivities).isEmpty()
+    }
+
+    @Test
+    fun `类别列表为空时直接返回，连待办都不排`() {
+        connect()
+        fixture.stubShowInAppMessages()
+
+        wrapper.showInAppMessagesIfNeeded(liveActivity(), emptyList()) { }
+        idleMain()
+
+        assertThat(fixture.inAppMessageActivities).isEmpty()
+        assertThat(wrapper.pendingRequestCount()).isZero()
+    }
+
+    @Test
+    fun `未连接时先进队，连上之后才展示`() {
+        buildClient(ready = false)
+        fixture.stubShowInAppMessages()
+
+        wrapper.showInAppMessagesIfNeeded(liveActivity(), InAppMessageType.ALL) { }
+        idleMain()
+        assertThat(fixture.inAppMessageActivities).isEmpty()
+        assertThat(wrapper.pendingRequestCount()).isEqualTo(1)
+
+        fixture.setReady(true)
+        wrapper.onBillingSetupFinished(FakeBillingClientFixture.ok())
+        idleMain()
+
+        assertThat(fixture.inAppMessageActivities).hasSize(1)
+    }
+
+    /** 一个「活着并且已经 attach 到 window」的 Activity：relaxed mock 的默认值正好满足三道守卫。 */
+    private fun liveActivity(): Activity = mockk(relaxed = true)
 
     // endregion
 

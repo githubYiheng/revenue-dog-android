@@ -3,6 +3,7 @@ package org.revdog.purchases.support
 import android.app.Activity
 import io.mockk.every
 import io.mockk.mockk
+import org.revdog.purchases.InAppMessageType
 import org.revdog.purchases.ProductType
 import org.revdog.purchases.PurchasesAreCompletedBy
 import org.revdog.purchases.PurchasesError
@@ -80,6 +81,12 @@ internal class BillingHarness {
     /** `false` 时 `acknowledge` 不回调成功（模拟 Play 侧 ack 失败）。 */
     var acknowledgeSucceeds: Boolean = true
 
+    /** 每次 `showInAppMessagesIfNeeded` 的入参（Activity + 类别列表）。 */
+    val inAppMessageCalls: MutableList<Pair<Activity, List<InAppMessageType>>> = mutableListOf()
+
+    /** 最近一次 `showInAppMessagesIfNeeded` 交给 Billing 层的「订阅状态已更新」回调。 */
+    private var subscriptionStatusChange: (() -> Unit)? = null
+
     init {
         every { wrapper.purchasesUpdatedListener = any() } answers { updatedListener = firstArg() }
         every { wrapper.stateListener = any() } answers { stateListener = firstArg() }
@@ -141,6 +148,11 @@ internal class BillingHarness {
             onConsumed(token)
         }
 
+        every { wrapper.showInAppMessagesIfNeeded(any(), any(), any()) } answers {
+            inAppMessageCalls += firstArg<Activity>() to secondArg<List<InAppMessageType>>()
+            subscriptionStatusChange = thirdArg()
+        }
+
         every { wrapper.consumeAndSave(any(), any(), any(), any()) } answers {
             consumeAndSaveCalls += ConsumeAndSaveCall(
                 purchasesAreCompletedBy = firstArg(),
@@ -165,6 +177,11 @@ internal class BillingHarness {
     /** 模拟 BillingClient（重）连接成功 —— 补报的触发点。 */
     fun deliverConnected() {
         stateListener?.onConnected() ?: error("编排层还没挂 stateListener")
+    }
+
+    /** 模拟「用户在 Play in-app message 里把订阅救回来了」。 */
+    fun deliverSubscriptionStatusUpdated() {
+        subscriptionStatusChange?.invoke() ?: error("还没有人调过 showInAppMessagesIfNeeded")
     }
 
     /** 编排层注入的上下文查询口子（决策 D：表只有一份）。 */

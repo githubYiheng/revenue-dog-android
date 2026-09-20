@@ -37,6 +37,13 @@ Play Billing Library **9.1.0** 基线，`minSdk 24` / `compileSdk 36` / JVM 17�
   `acknowledged_by=sdk_timeout`。**consume 只在 SDK 做。**
 - **restore / sync**：`restorePurchases`（`initiation_source=restore`）与
   `syncPurchases`（`unsynced_active_purchases`，只上报不碰 Billing）。
+- **Play in-app messages**：扣款失败时 Google 官方的挽回 snackbar。
+  `showInAppMessagesAutomatically` **默认开**（与 RC 一致）—— SDK 注册
+  `Application.ActivityLifecycleCallbacks`，每个 Activity 的 `onStart` 展示一次；
+  关掉后由宿主调 `Purchases.showInAppMessagesIfNeeded(activity, types)`（类别默认 `InAppMessageType.ALL`）。
+  用户在 snackbar 里修好扣款之后触发一次 `syncPurchases`，新权益走 CustomerInfo 通道。
+  两处偏离 RC：`InAppMessageType` 是 `@Poko class` 而非 public enum（`ForbiddenPublicEnum`）；
+  `close()` **会注销**那组 Activity 回调（RC 不注销，换配置重建后旧实例会一直被唤醒）。
 - **订阅者属性**：LWW 本地缓存、保留键全集、50 个自定义属性上限、墓碑语义、
   随 `POST /v1/receipts` 搭车上行，`attributes_error_response` 里出错的键也标已同步。
 - **客户端诊断**：JSONL 队列（500 条 / 256 KB）+ 攒批上传 `POST /v1/diagnostics/events`
@@ -63,7 +70,7 @@ Play Billing Library **9.1.0** 基线，`minSdk 24` / `compileSdk 36` / JVM 17�
   模块（Java 与 Kotlin 各调一遍全部公开 API，只编译不运行）。
 - detekt **零 baseline**（自定义规则 `ForbiddenPublicEnum`：公开面不许有 enum，
   后端加枚举值不能摔老宿主）；显式 API 模式 `-Xexplicit-api=strict`。
-- 378 条 Robolectric 单测，含故障注入全矩阵（断网 / 超时 / 5xx / 401 / 403 / 404 / 408 / 429 /
+- 415 条 Robolectric 单测，含故障注入全矩阵（断网 / 超时 / 5xx / 401 / 403 / 404 / 408 / 429 /
   400 类确定性拒绝 / 断连 / 进程被杀 / 回调重复 / 时钟回拨 / ETag 损坏 / 诊断 4xx）。
 - consumer ProGuard 规则随 aar 分发，门禁 = `:example:assembleRelease`（`minifyEnabled true`）
   + `scripts/r8-check.sh`（断言 R8 的 configuration / seeds / usage / mapping 四份产物）。

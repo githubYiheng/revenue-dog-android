@@ -72,6 +72,7 @@ class MyApp : Application() {
 | `diagnosticsEnabled(Boolean)` | `true` | 关掉时 SDK 不记不发，并清空本地队列目录 |
 | `purchasesCompletedBy(…)` | `REVENUE_DOG` | `MY_APP` = 宿主自己 ack / consume，SDK 只上报 |
 | `pendingTransactionsForPrepaidPlansEnabled(Boolean)` | `false` | 预付费套餐的 pending 交易 |
+| `showInAppMessagesAutomatically(Boolean)` | `true` | Play 扣款失败提示的自动展示，见第 7 节 |
 
 ### 2. 身份：`logIn` / `logOut`
 
@@ -158,7 +159,28 @@ Purchases.sharedInstance.syncAttributes()          // 可选：立刻发；否�
 fire-and-forget：返回值是**端上就被拒**的键（键名非法 / value > 500 / 触及 50 个自定义属性上限）。
 `null` 与空串都是墓碑（上行编码成空串，服务端存 NULL）。
 
-### 7. 诊断
+### 7. Play in-app messages（扣款失败的挽回提示）
+
+用户的订阅续费被拒（卡过期 / 余额不足）时，Play 会弹一条 snackbar 告诉他并给出修复入口 ——
+Google 官方的挽回通道。**默认自动展示**：SDK 注册 `Application.ActivityLifecycleCallbacks`，
+在每个 Activity 的 `onStart` 展示一次，宿主什么都不用写。
+
+```kotlin
+// 关掉自动展示（想自己挑时机、避开引导页 / 全屏视频）
+PurchasesConfiguration.Builder(context, key).showInAppMessagesAutomatically(false).build()
+
+// 关掉之后由宿主自己调（类别默认 InAppMessageType.ALL）
+Purchases.sharedInstance.showInAppMessagesIfNeeded(activity)
+```
+
+没有待展示的消息时什么都不会发生。用户在 snackbar 里把订阅救回来之后 Play 只说「状态变了」，
+所以 SDK 会自动跑一次 `syncPurchases` 把设备上的活跃购买重新上报，新权益经
+`updatedCustomerInfoListener` / `customerInfoFlow` 推出来 —— **`showInAppMessagesIfNeeded` 本身不回调**。
+
+> **关掉了就一定要自己调**：既不自动展示、也不手动调 = 扣款失败的用户永远收不到提示，
+> 那笔订阅就这么静默流失了。
+
+### 8. 诊断
 
 默认**开启**。SDK 在关键节点记结构化事件 → 本地 JSONL 队列 → 攒批
 `POST /v1/diagnostics/events`。**不上传任何日志文本、不上传 token / 密钥 / 邮箱姓名**，
@@ -173,7 +195,7 @@ PurchasesConfiguration.Builder(context, key).diagnosticsEnabled(false).build()
 > **宿主侧还有两件事**（与 iOS 同）：Play Console 的 Data Safety 表单要自己勾
 > User ID / Device ID / Diagnostics；`appUserID` **不得**是邮箱等个人信息。
 
-### 8. ProGuard / R8
+### 9. ProGuard / R8
 
 宿主什么都不用加。SDK 随 aar 带出 `consumer-rules.pro`，keep 住公开面、Play Billing 的 IPC 回调、
 `org.json`（SDK 的整个解析层建在它上面）与 `androidx.lifecycle.DefaultLifecycleObserver`。
@@ -185,7 +207,7 @@ PurchasesConfiguration.Builder(context, key).diagnosticsEnabled(false).build()
 
 ```bash
 cd sdk/android
-./gradlew :purchases:testDebugUnitTest      # 378 条 Robolectric 单测
+./gradlew :purchases:testDebugUnitTest      # 415 条 Robolectric 单测
 ./gradlew :purchases:lintDebug detekt       # lint + detekt（零 baseline）
 ./gradlew :api-tester:compileDebugKotlin :api-tester:compileDebugJavaWithJavac
 bash scripts/api-check.sh                   # 公开 API 基线门禁

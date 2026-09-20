@@ -31,6 +31,19 @@ package org.revdog.purchases {
     method @KotlinOnly @kotlin.jvm.JvmSynthetic public static suspend Object? awaitSyncPurchases(org.revdog.purchases.Purchases, kotlin.coroutines.Continuation<? super org.revdog.purchases.customerinfo.CustomerInfo>);
   }
 
+  @dev.drewhamilton.poko.Poko public final class InAppMessageType {
+    method @InaccessibleFromKotlin public String getName();
+    property public String name;
+    field public static final java.util.List<org.revdog.purchases.InAppMessageType> ALL;
+    field public static final org.revdog.purchases.InAppMessageType BILLING_ISSUES;
+    field public static final org.revdog.purchases.InAppMessageType.Companion Companion;
+  }
+
+  public static final class InAppMessageType.Companion {
+    property public java.util.List<org.revdog.purchases.InAppMessageType> ALL;
+    property public org.revdog.purchases.InAppMessageType BILLING_ISSUES;
+  }
+
   @kotlin.RequiresOptIn(level=kotlin.RequiresOptIn.Level.ERROR, message="This API is internal to RevenueDog and may change or be removed without a major version bump.") @kotlin.annotation.Retention(kotlin.annotation.AnnotationRetention.BINARY) @kotlin.annotation.Target(allowedTargets={kotlin.annotation.AnnotationTarget.CLASS, kotlin.annotation.AnnotationTarget.FUNCTION, kotlin.annotation.AnnotationTarget.PROPERTY, kotlin.annotation.AnnotationTarget.CONSTRUCTOR, kotlin.annotation.AnnotationTarget.PROPERTY_GETTER, kotlin.annotation.AnnotationTarget.PROPERTY_SETTER}) public @interface InternalRevenueDogAPI {
   }
 
@@ -245,6 +258,8 @@ package org.revdog.purchases {
     method public void setPushToken(String? value);
     method public void setTenjinID(String? value);
     method @InaccessibleFromKotlin public void setUpdatedCustomerInfoListener(org.revdog.purchases.UpdatedCustomerInfoListener?);
+    method public void showInAppMessagesIfNeeded(android.app.Activity activity);
+    method public void showInAppMessagesIfNeeded(android.app.Activity activity, optional java.util.List<org.revdog.purchases.InAppMessageType> inAppMessageTypes);
     method public void syncAttributes();
     method public void syncPurchases(org.revdog.purchases.ReceiveCustomerInfoCallback callback);
     property public String appUserID;
@@ -293,6 +308,7 @@ package org.revdog.purchases {
     method @InaccessibleFromKotlin public org.revdog.purchases.LogLevel getLogLevel();
     method @InaccessibleFromKotlin public boolean getPendingTransactionsForPrepaidPlansEnabled();
     method @InaccessibleFromKotlin public org.revdog.purchases.PurchasesAreCompletedBy getPurchasesCompletedBy();
+    method @InaccessibleFromKotlin public boolean getShowInAppMessagesAutomatically();
     property public String apiKey;
     property public String? appUserID;
     property public String baseURL;
@@ -301,6 +317,7 @@ package org.revdog.purchases {
     property public org.revdog.purchases.LogLevel logLevel;
     property public boolean pendingTransactionsForPrepaidPlansEnabled;
     property public org.revdog.purchases.PurchasesAreCompletedBy purchasesCompletedBy;
+    property public boolean showInAppMessagesAutomatically;
     field public static final org.revdog.purchases.PurchasesConfiguration.Companion Companion;
     field public static final String DEFAULT_BASE_URL = "https://api.revdog.org";
   }
@@ -314,6 +331,7 @@ package org.revdog.purchases {
     method public org.revdog.purchases.PurchasesConfiguration.Builder logLevel(org.revdog.purchases.LogLevel level);
     method public org.revdog.purchases.PurchasesConfiguration.Builder pendingTransactionsForPrepaidPlansEnabled(boolean enabled);
     method public org.revdog.purchases.PurchasesConfiguration.Builder purchasesCompletedBy(org.revdog.purchases.PurchasesAreCompletedBy value);
+    method public org.revdog.purchases.PurchasesConfiguration.Builder showInAppMessagesAutomatically(boolean enabled);
   }
 
   public static final class PurchasesConfiguration.Companion {
