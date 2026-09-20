@@ -24,6 +24,8 @@ import org.revdog.purchases.offerings.Offerings
 @Suppress("TooManyFunctions")
 public class Purchases private constructor(
     private val orchestrator: PurchasesOrchestrator,
+    /** 建这个实例用的那份配置。只用于 [configure] 的「同配置重复调用」判定。 */
+    private val configuration: PurchasesConfiguration,
 ) {
 
     // region 身份
@@ -321,17 +323,26 @@ public class Purchases private constructor(
          * 配置 SDK。**必须在启动期调用**（`Application.onCreate`）：
          * 晚于第一笔购买的 configure 就是丢单源。
          *
-         * 重复 configure **打日志并替换**（RC 同款）：宿主热重载 / 多进程时会发生，
-         * 静默忽略比替换更危险 —— 那会让第二次传进来的 appUserID 完全不生效。
+         * 重复 configure 分两种（判定与分支均对照 RC `Purchases.configure`）：
+         * - **配置与当前实例相同** → 直接返回已有实例，只打一条 info。宿主在多个入口
+         *   （`Application.onCreate` + 某个 Activity）各调一次是常态，为此重建实例会白白丢掉
+         *   BillingClient 连接、进行中的购买回调与内存缓存；
+         * - **配置不同** → 关掉旧实例、用新配置重建。静默忽略比替换更危险 ——
+         *   那会让第二次传进来的 appUserID 完全不生效。关闭时进行中的购买回调会收到一个错误
+         *   （见 `PurchasesOrchestrator.close`），不会被永远挂着。
          */
         @JvmStatic
         public fun configure(configuration: PurchasesConfiguration): Purchases = synchronized(lock) {
             Logger.logLevel = configuration.logLevel
-            instance?.let {
+            instance?.let { existing ->
+                if (existing.configuration.sameAs(configuration)) {
+                    Logger.info { "Purchases 已经用同一份配置 configure 过了，直接返回已有实例" }
+                    return existing
+                }
                 Logger.warn { "Purchases 已经 configure 过了，用新配置替换旧实例" }
-                it.orchestrator.close()
+                existing.orchestrator.close()
             }
-            val purchases = Purchases(PurchasesOrchestrator.create(configuration))
+            val purchases = Purchases(PurchasesOrchestrator.create(configuration), configuration)
             instance = purchases
             purchases
         }

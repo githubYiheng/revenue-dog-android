@@ -101,8 +101,6 @@ internal class OrchestratorHarness(
 
     private val identityManager = IdentityManager(deviceCache, backend)
     private val updateHandler = CustomerInfoUpdateHandler(deviceCache, identityManager, MainDispatcher(null))
-    private val customerInfoManager =
-        CustomerInfoManager(backend, deviceCache, updateHandler, MainDispatcher(null), dateProvider)
 
     val attributesCache: SubscriberAttributesCache =
         SubscriberAttributesCache(preferences, FakeHTTPClient.TEST_API_KEY)
@@ -130,6 +128,35 @@ internal class OrchestratorHarness(
 
     private val postTransactionsHelper = PostTransactionsHelper(billing.wrapper, postReceiptHelper)
 
+    // 装配顺序与生产 `create` 一致：补报 helper 先于 CustomerInfoManager（后者要用它）。
+    private val postPendingTransactionsHelper = PostPendingTransactionsHelper(
+        appConfig = appConfig,
+        deviceCache = deviceCache,
+        billing = billing.wrapper,
+        dispatcher = DirectDispatcher(),
+        postTransactionsHelper = postTransactionsHelper,
+        postReceiptHelper = postReceiptHelper,
+    )
+
+    /** 「取 CustomerInfo 前补报」的超时兜底：攒着不跑，用例调 [fireSyncTimeouts] 才触发。 */
+    private val pendingSyncTimeouts: MutableList<() -> Unit> = mutableListOf()
+
+    fun fireSyncTimeouts() {
+        val due = pendingSyncTimeouts.toList()
+        pendingSyncTimeouts.clear()
+        due.forEach { it() }
+    }
+
+    private val customerInfoManager = CustomerInfoManager(
+        backend = backend,
+        deviceCache = deviceCache,
+        updateHandler = updateHandler,
+        mainDispatcher = MainDispatcher(null),
+        postPendingTransactionsHelper = postPendingTransactionsHelper,
+        dateProvider = dateProvider,
+        scheduleTimeout = { _, action -> pendingSyncTimeouts += action },
+    )
+
     val orchestrator: PurchasesOrchestrator = PurchasesOrchestrator(
         appConfig = appConfig,
         identityManager = identityManager,
@@ -149,14 +176,10 @@ internal class OrchestratorHarness(
         pendingPurchases = pendingPurchases,
         postReceiptHelper = postReceiptHelper,
         postTransactionsHelper = postTransactionsHelper,
-        postPendingTransactionsHelper = PostPendingTransactionsHelper(
-            deviceCache = deviceCache,
-            billing = billing.wrapper,
-            dispatcher = DirectDispatcher(),
-            postTransactionsHelper = postTransactionsHelper,
-            postReceiptHelper = postReceiptHelper,
-        ),
+        postPendingTransactionsHelper = postPendingTransactionsHelper,
         attributesManager = attributesManager,
+        // 生命周期钩子（F）在 `DirectDispatcher` 下仍然是同步的，测试断言不必等异步。
+        dispatcher = DirectDispatcher(),
         configuredAppUserID = appUserID,
         observeProcessLifecycle = false,
         dateProvider = dateProvider,

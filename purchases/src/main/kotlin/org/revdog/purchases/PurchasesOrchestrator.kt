@@ -81,6 +81,8 @@ internal class PurchasesOrchestrator(
     private val postTransactionsHelper: PostTransactionsHelper,
     private val postPendingTransactionsHelper: PostPendingTransactionsHelper,
     private val attributesManager: SubscriberAttributesManager,
+    /** 业务后台执行器（与 `Backend` / 属性同步共用那一条单线程）。生命周期钩子靠它离开主线程。 */
+    private val dispatcher: Dispatcher,
     configuredAppUserID: String?,
     private val observeProcessLifecycle: Boolean = true,
     /** 关掉诊断时为 `null`（那时 [diagnostics] 是 no-op）。生命周期钩子要用它刷队列。 */
@@ -114,15 +116,26 @@ internal class PurchasesOrchestrator(
      * 只靠 `UpdatedCustomerInfoListener` / `customerInfoFlow` 判权益的宿主（RC 官方推荐写法之一）
      * 冷启后拿到的永远是盘上那份旧快照：已过期的订阅继续放行，别的设备上买的也进不来。
      * 失败只记日志与诊断、不打扰宿主（RC 同款）；成功经 `cacheAndNotifyListeners` 推给 listener。
+     *
+     * **只有前后台状态的翻转留在调用线程**（`ProcessLifecycleOwner` 的 `onStart` 跑在主线程），
+     * 其余三件事一律丢给 [dispatcher]（对照 RC `PurchasesOrchestrator.kt:369` 的 `enqueue { }`）：
+     * 它们会读 SharedPreferences、发 HTTP、调 BillingClient —— 压在主线程上就是 ANR 的原料。
+     * 状态翻转必须留在同步段：紧随其后的请求要按「前台」算 TTL 与抖动，晚一步就错。
      */
     internal fun onAppForegrounded() {
         val firstTime = firstTimeInForeground.getAndSet(false)
         setAppBackgrounded(false)
-        refreshCustomerInfoOnForeground(firstTime)
-        // 前台恢复是补报的两个触发点之一（考古 §3.4）。
-        syncPendingPurchaseQueue()
-        // 属性同步时机之一（设计 §5）：回前台。
-        syncAttributes()
+        dispatcher.enqueue(
+            Runnable {
+                refreshCustomerInfoOnForeground(firstTime)
+                // 前台恢复是补报的两个触发点之一（考古 §3.4）。
+                // 上一行那次取 CustomerInfo 内部也会补报一轮（RC 同款的两步），
+                // 同一笔被两条路同时送出时由 `Backend.postReceiptCallbacks` 的并发去重合并成一次请求。
+                syncPendingPurchaseQueue()
+                // 属性同步时机之一（设计 §5）：回前台。
+                syncAttributes()
+            },
+        )
     }
 
     internal fun onAppBackgrounded() {
@@ -231,7 +244,12 @@ internal class PurchasesOrchestrator(
             newAppUserID = newAppUserID,
             onSuccess = { customerInfo, created ->
                 // 刚才那一轮没发成功的，跟着身份搬到新 id（RC `copyUnsyncedSubscriberAttributes`）。
-                attributesManager.copyUnsyncedAttributes(from = oldAppUserID, to = newAppUserID)
+                // **只在旧身份是匿名时搬**（RC `IdentityManager.copySubscriberAttributesToNewUserIfOldIsAnonymous`，
+                // iOS `migrateIfOldIsAnonymous` 同款）：匿名 → 具名是同一个人登录，属性本来就是他的；
+                // 具名 A → 具名 B 是换了个人，把 A 还没发出去的 `$email` 等属性搬到 B 名下就是串号。
+                if (IdentityManager.isUserIDAnonymous(oldAppUserID)) {
+                    attributesManager.copyUnsyncedAttributes(from = oldAppUserID, to = newAppUserID)
+                }
                 updateHandler.resetLastSent()
                 updateHandler.notifyListeners(customerInfo, newAppUserID)
                 // 身份换了，offerings 也要按新身份重拉（不同用户可能命中不同 offering）。
@@ -289,6 +307,15 @@ internal class PurchasesOrchestrator(
                 identityManager.commitLogOut(candidate)
                 updateHandler.resetLastSent()
                 updateHandler.cacheAndNotifyListeners(customerInfo, candidate)
+                // 与 logIn 成功后同款（RC `logOut` → `updateAllCaches`）：身份换了，offerings 也要按新身份重拉。
+                // 不重拉的话付费墙上还挂着上一个用户命中的那组 offering。失败静默 —— logOut 本身已经成功了。
+                offeringsManager.getOfferings(
+                    appUserID = candidate,
+                    appInBackground = appConfig.isAppBackgrounded,
+                    fetchCurrent = true,
+                    onError = { Logger.warn { "logOut 后刷新 offerings 失败：$it" } },
+                    onSuccess = { _, _ -> },
+                )
                 diagnostics.track(DiagnosticsTracker.EVENT_IDENTITY_LOGOUT)
                 mainDispatcher.dispatch { callback.onReceived(customerInfo) }
             },
@@ -884,7 +911,29 @@ internal class PurchasesOrchestrator(
         billing.appInBackground = backgrounded
     }
 
+    /**
+     * 关闭这个实例（宿主用新配置重新 `configure` 时走这里）。
+     *
+     * **偏离 RC**：RC 的 `close()` 只把 `purchaseCallbacksByProductId` 清空（`Orchestrator:960-962`），
+     * 进行中的 `purchase()` 回调从此再也不会被调用 —— 宿主的 loading 转圈永远停不下来。
+     * 我方照既有纪律（`BillingWrapper.executeRequestOnUIThread`：「不能让 `purchase()` 永远不回调」）
+     * 把它们**排空并逐个回错误**。`userCancelled = false`：这不是用户取消的。
+     *
+     * 只动内存里的回调表，**落盘的上报上下文留着** —— 钱可能已经扣了，
+     * 新实例的补报链路还要靠它把这笔找回来。
+     */
     fun close() {
+        pendingPurchases.takeAllCallbacks().forEach { callback ->
+            mainDispatcher.dispatch {
+                callback.onError(
+                    PurchasesError(
+                        PurchasesErrorCode.ConfigurationError,
+                        "SDK 实例已关闭（重新 configure）：这笔购买的结果不会再回调，请在新实例上重试或调 syncPurchases",
+                    ),
+                    userCancelled = false,
+                )
+            }
+        }
         diagnosticsRecorder?.close()
         if (observeProcessLifecycle) {
             mainDispatcher.dispatch {
@@ -941,7 +990,6 @@ internal class PurchasesOrchestrator(
             )
             val identityManager = IdentityManager(deviceCache, backend)
             val updateHandler = CustomerInfoUpdateHandler(deviceCache, identityManager, mainDispatcher)
-            val customerInfoManager = CustomerInfoManager(backend, deviceCache, updateHandler, mainDispatcher)
 
             // 诊断：专用线程（对照 RC `revenuecat-events-thread`）+ 文件队列 + 攒批上传。
             // **即使 diagnosticsEnabled = false 也要建**：`start()` 那一下要把上一版开着的时候
@@ -992,7 +1040,7 @@ internal class PurchasesOrchestrator(
                 dispatcher = dispatcher,
             )
 
-            val billing = BillingWrapper(
+            val billing = configuration.billingOverride ?: BillingWrapper(
                 clientFactory = BillingWrapper.ClientFactory(
                     context,
                     configuration.pendingTransactionsForPrepaidPlansEnabled,
@@ -1013,6 +1061,22 @@ internal class PurchasesOrchestrator(
                 attributesManager = attributesManager,
             )
             val postTransactionsHelper = PostTransactionsHelper(billing, postReceiptHelper)
+            // 补报 helper 必须先于 CustomerInfoManager 建好：后者的每条「要发请求」的路径都先过它一轮。
+            val postPendingTransactionsHelper = PostPendingTransactionsHelper(
+                appConfig = appConfig,
+                deviceCache = deviceCache,
+                billing = billing,
+                dispatcher = dispatcher,
+                postTransactionsHelper = postTransactionsHelper,
+                postReceiptHelper = postReceiptHelper,
+            )
+            val customerInfoManager = CustomerInfoManager(
+                backend = backend,
+                deviceCache = deviceCache,
+                updateHandler = updateHandler,
+                mainDispatcher = mainDispatcher,
+                postPendingTransactionsHelper = postPendingTransactionsHelper,
+            )
 
             return PurchasesOrchestrator(
                 appConfig = appConfig,
@@ -1027,14 +1091,9 @@ internal class PurchasesOrchestrator(
                 pendingPurchases = pendingPurchases,
                 postReceiptHelper = postReceiptHelper,
                 postTransactionsHelper = postTransactionsHelper,
-                postPendingTransactionsHelper = PostPendingTransactionsHelper(
-                    deviceCache = deviceCache,
-                    billing = billing,
-                    dispatcher = dispatcher,
-                    postTransactionsHelper = postTransactionsHelper,
-                    postReceiptHelper = postReceiptHelper,
-                ),
+                postPendingTransactionsHelper = postPendingTransactionsHelper,
                 attributesManager = attributesManager,
+                dispatcher = dispatcher,
                 configuredAppUserID = configuration.appUserID,
                 diagnosticsRecorder = diagnosticsRecorder,
             )

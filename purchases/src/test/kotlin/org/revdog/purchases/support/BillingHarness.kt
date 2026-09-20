@@ -59,6 +59,9 @@ internal class BillingHarness {
     var purchasesOnDevice: List<StoreTransaction> = emptyList()
     var queryPurchasesError: PurchasesError? = null
 
+    /** `true` = `queryPurchases` 永不回调（模拟 BillingClient 卡在重连退避里、待办一直排队）。 */
+    var queryPurchasesNeverResponds: Boolean = false
+
     /** `queryProductDetailsAsync` 的返回值。 */
     var subscriptionProducts: List<StoreProduct> = emptyList()
     var inAppProducts: List<StoreProduct> = emptyList()
@@ -96,8 +99,10 @@ internal class BillingHarness {
         every { wrapper.queryPurchases(any(), any()) } answers {
             val onSuccess = firstArg<(Map<String, StoreTransaction>) -> Unit>()
             val onError = secondArg<(PurchasesError) -> Unit>()
-            queryPurchasesError?.let { onError(it) }
-                ?: onSuccess(purchasesOnDevice.associateBy { it.purchaseToken.sha1() })
+            if (!queryPurchasesNeverResponds) {
+                queryPurchasesError?.let { onError(it) }
+                    ?: onSuccess(purchasesOnDevice.associateBy { it.purchaseToken.sha1() })
+            }
         }
 
         every { wrapper.findPurchaseForProductId(any(), any(), any()) } answers {

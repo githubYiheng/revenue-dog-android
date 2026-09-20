@@ -1,5 +1,7 @@
 package org.revdog.purchases.customerinfo
 
+import android.os.Handler
+import android.os.Looper
 import org.revdog.purchases.CacheFetchPolicy
 import org.revdog.purchases.Logger
 import org.revdog.purchases.PurchasesError
@@ -13,6 +15,9 @@ import org.revdog.purchases.common.DeliveryOrigin
 import org.revdog.purchases.common.MainDispatcher
 import org.revdog.purchases.identity.IdentityManager
 import org.revdog.purchases.networking.Backend
+import org.revdog.purchases.posting.PostPendingTransactionsHelper
+import org.revdog.purchases.posting.SyncPendingPurchaseResult
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * CustomerInfo 的缓存与通知。结构对照 RC `CustomerInfoUpdateHandler.kt`。
@@ -84,14 +89,25 @@ internal class CustomerInfoUpdateHandler(
 
 /**
  * `getCustomerInfo(fetchPolicy)` 的四态实现。
- * 结构对照 RC `CustomerInfoHelper.kt`（去掉离线权益与补报分支 —— 那些是 M2/M3）。
+ * 结构对照 RC `CustomerInfoHelper.kt`（去掉离线权益分支 —— 我方没有离线权益计算）。
+ *
+ * **每一条「要发网络请求」的路径都先补报一轮待同步购买**（RC `CustomerInfoHelper.kt:88-109`）：
+ * 先把端上还没上报成功的购买送出去，后端的权益才是全的。不这么做的话，
+ * 「买成功但上报前进程被杀」的那笔会一直到下一次连接成功 / 回前台才被发现，
+ * 期间宿主主动拉到的 CustomerInfo 里没有它 —— 用户付了钱看不到权益。
  */
+@Suppress("LongParameterList")
 internal class CustomerInfoManager(
     private val backend: Backend,
     private val deviceCache: DeviceCache,
     private val updateHandler: CustomerInfoUpdateHandler,
     private val mainDispatcher: MainDispatcher,
+    private val postPendingTransactionsHelper: PostPendingTransactionsHelper,
     private val dateProvider: DateProvider = DefaultDateProvider(),
+    /** 「N 毫秒后跑一下」。生产 = 主线程 Handler；测试注入手动触发的替身。 */
+    private val scheduleTimeout: (delayMs: Long, action: () -> Unit) -> Unit = { delayMs, action ->
+        Handler(Looper.getMainLooper()).postDelayed(action, delayMs)
+    },
 ) {
 
     /**
@@ -108,7 +124,8 @@ internal class CustomerInfoManager(
         Logger.debug { "获取 CustomerInfo（policy=$fetchPolicy）" }
         when (fetchPolicy) {
             CacheFetchPolicy.CACHE_ONLY -> getCacheOnly(appUserID, onSuccess, onError)
-            CacheFetchPolicy.FETCH_CURRENT -> fetchAndCache(appUserID, appInBackground, onSuccess, onError)
+            CacheFetchPolicy.FETCH_CURRENT ->
+                postPendingPurchasesAndFetch(appUserID, appInBackground, onSuccess, onError)
             CacheFetchPolicy.CACHED_OR_FETCHED ->
                 getCachedOrFetched(appUserID, appInBackground, onSuccess, onError)
             CacheFetchPolicy.NOT_STALE_CACHED_OR_CURRENT ->
@@ -147,13 +164,13 @@ internal class CustomerInfoManager(
     ) {
         val cached = deviceCache.getCachedCustomerInfo(appUserID)
         if (cached == null) {
-            fetchAndCache(appUserID, appInBackground, onSuccess, onError)
+            postPendingPurchasesAndFetch(appUserID, appInBackground, onSuccess, onError)
             return
         }
         mainDispatcher.dispatch { onSuccess(cached, DeliveryOrigin.CACHE) }
         if (isStale(appUserID, appInBackground)) {
             Logger.debug { "CustomerInfo 缓存已过期，后台刷新" }
-            fetchAndCache(appUserID, appInBackground, onSuccess = { _, _ -> }, onError = {})
+            postPendingPurchasesAndFetch(appUserID, appInBackground, onSuccess = { _, _ -> }, onError = {})
         }
     }
 
@@ -168,7 +185,56 @@ internal class CustomerInfoManager(
             mainDispatcher.dispatch { onSuccess(cached, DeliveryOrigin.CACHE) }
             return
         }
-        fetchAndCache(appUserID, appInBackground, onSuccess, onError)
+        postPendingPurchasesAndFetch(appUserID, appInBackground, onSuccess, onError)
+    }
+
+    /**
+     * 先补报待同步购买，再决定要不要真的发 `GET /v1/subscribers`
+     * （结构对照 RC `CustomerInfoHelper.postPendingPurchasesAndFetchCustomerInfo`，130-183 行）。
+     *
+     * - **补报真的送出去了东西并拿回了 CustomerInfo** → 就交付那份，**不再多发一次 GET**
+     *   （它比 GET 还新：包含刚补报的那笔）。缓存与 listener 已经由
+     *   `PostReceiptHelper.performPostReceipt` 的成功分支 `cacheAndNotifyListeners` 过了，
+     *   这里不重复写（RC 同）；
+     * - **没有待补报 / 补报出错 / 自动补报被关** → 照原样走 [fetchAndCache]。
+     *
+     * `cache_hit` 口径：由补报交付的这一份也是刚从网络拿的，记 [DeliveryOrigin.NETWORK]（= `false`）。
+     */
+    private fun postPendingPurchasesAndFetch(
+        appUserID: String,
+        appInBackground: Boolean,
+        onSuccess: (CustomerInfo, DeliveryOrigin) -> Unit,
+        onError: (PurchasesError) -> Unit,
+    ) {
+        // **偏离 RC：顺带补报有 [SYNC_BEFORE_FETCH_TIMEOUT_MS] 的兜底。** 补报第一步是 `queryPurchases`，
+        // BillingClient 没连上时它只会排队；连接若卡在可重试错误的退避里（封顶 15 分钟），
+        // RC 的写法会让宿主的 `getCustomerInfo` 回调跟着挂到连上为止。权益查询不能被 Play 的连接状态
+        // 劫持：超时就直接走 GET（= 补上这一步之前的行为），迟到的补报结果不再交付 ——
+        // 它自己的成功分支已经 `cacheAndNotifyListeners` 过，listener 照样会收到。
+        val settled = AtomicBoolean(false)
+        scheduleTimeout(SYNC_BEFORE_FETCH_TIMEOUT_MS) {
+            if (settled.compareAndSet(false, true)) {
+                Logger.warn { "取 CustomerInfo 前的补报 ${SYNC_BEFORE_FETCH_TIMEOUT_MS}ms 没有结果，直接走 GET" }
+                fetchAndCache(appUserID, appInBackground, onSuccess, onError)
+            }
+        }
+        postPendingTransactionsHelper.syncPendingPurchaseQueue(
+            appUserID = appUserID,
+            skipIfAutoSyncDisabled = true,
+        ) { result ->
+            if (!settled.compareAndSet(false, true)) return@syncPendingPurchaseQueue
+            when (result) {
+                is SyncPendingPurchaseResult.Success -> {
+                    Logger.debug { "补报待同步购买已经带回 CustomerInfo，直接交付、不再发 GET" }
+                    mainDispatcher.dispatch { onSuccess(result.customerInfo, DeliveryOrigin.NETWORK) }
+                }
+
+                is SyncPendingPurchaseResult.Error,
+                SyncPendingPurchaseResult.NoPendingPurchasesToSync,
+                SyncPendingPurchaseResult.AutoSyncDisabled,
+                -> fetchAndCache(appUserID, appInBackground, onSuccess, onError)
+            }
+        }
     }
 
     private fun fetchAndCache(
@@ -201,6 +267,11 @@ internal class CustomerInfoManager(
                 }
             },
         )
+    }
+
+    internal companion object {
+        /** 取 CustomerInfo 前那轮补报的最长等待。正常是一次本机 IPC + 至多一次上报，远小于它。 */
+        const val SYNC_BEFORE_FETCH_TIMEOUT_MS: Long = 5_000L
     }
 
     private fun isStale(appUserID: String, appInBackground: Boolean): Boolean = CacheDurations.isStale(

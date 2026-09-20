@@ -100,10 +100,10 @@ internal class SubscriberAttributesCache(
      * 只搬未同步的那些：已同步的属于旧 customer，服务端那边已经落库了。
      * 新身份下已有同键且不更旧 → 不覆盖（LWW，与 iOS `migrateIfOldIsAnonymous` 同规则）。
      *
-     * **偏离 iOS 一处**：iOS 只在「旧身份是匿名」时迁移（坑 #52，避免两个真实用户之间串属性）。
-     * Android 这里搬的**只有未同步项**，它们在服务端一行都还没有 —— 丢掉就是丢掉用户刚设的值；
-     * 而 `logIn` 的语义本身就是「把当前设备上的这个人合并进新 id」（服务端 identify 四分支矩阵）。
-     * 与 RC 一致。
+     * **三端一致：只在「旧身份是匿名」时才会走到这里**（坑 #52，避免两个真实用户之间串属性）。
+     * 这道门在调用方：RC 在 `IdentityManager.copySubscriberAttributesToNewUserIfOldIsAnonymous`，
+     * iOS 在 `migrateIfOldIsAnonymous`，我方在 `PurchasesOrchestrator.logIn` 的成功回调里。
+     * 本方法自己不判身份形态 —— 它只负责「搬」这个动作。
      */
     @Synchronized
     fun copyUnsynced(from: String, to: String) {

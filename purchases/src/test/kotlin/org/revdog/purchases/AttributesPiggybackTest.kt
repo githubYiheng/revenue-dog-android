@@ -8,6 +8,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.revdog.purchases.attributes.SubscriberAttributeKeys
 import org.revdog.purchases.google.toStoreTransaction
+import org.revdog.purchases.identity.IdentityManager
+import org.revdog.purchases.networking.Endpoint
 import org.revdog.purchases.support.BillingHarness
 import org.revdog.purchases.support.Fixtures
 import org.revdog.purchases.support.OrchestratorHarness
@@ -146,8 +148,15 @@ class AttributesPiggybackTest {
         assertThat(harness.orchestrator.unsyncedAttributes()).isEmpty()
     }
 
+    /**
+     * 旧身份从具名（`user-42`）改成匿名：**迁移只在旧身份匿名时发生**
+     * （RC `copySubscriberAttributesToNewUserIfOldIsAnonymous` / iOS `migrateIfOldIsAnonymous`）。
+     * 具名 → 具名 不搬的那一面由 `IdentityTriggerPointsTest` 覆盖。
+     */
     @Test
-    fun `logIn 把未同步属性搬到新身份并再刷一轮`() {
+    fun `匿名 logIn 具名时把未同步属性搬到新身份并再刷一轮`() {
+        val anonymous = IdentityManager.generateAnonymousAppUserID()
+        val harness = OrchestratorHarness(context, billing, appUserID = anonymous)
         harness.orchestrator.setAttributes(mapOf("food" to "pizza"))
         // ① logIn 前的那一轮属性同步（失败，属性留着）
         harness.httpClient.enqueue(503, "")
@@ -168,7 +177,10 @@ class AttributesPiggybackTest {
 
         val attributeRequests = harness.httpClient.recordedRequests.filter { it.fullURL.path.endsWith("/attributes") }
         assertThat(attributeRequests.map { it.fullURL.path })
-            .containsExactly("/v1/subscribers/user-42/attributes", "/v1/subscribers/new-user/attributes")
+            .containsExactly(
+                "/v1/subscribers/${Endpoint.encode(anonymous)}/attributes",
+                "/v1/subscribers/new-user/attributes",
+            )
         assertThat(harness.orchestrator.unsyncedAttributes()).isEmpty()
     }
 }

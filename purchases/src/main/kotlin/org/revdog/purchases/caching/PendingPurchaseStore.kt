@@ -141,6 +141,18 @@ internal class PendingPurchaseStore(
         callbacks.remove(PendingPurchaseKey.normalize(productId))
 
     /**
+     * SDK 实例被关闭（宿主换配置重新 `configure`）时排空回调。
+     *
+     * **只动内存**：落盘的上下文一个都不清 —— 钱可能已经扣了，新实例的补报链路还要靠它把这笔找回来。
+     */
+    @Synchronized
+    fun takeAllCallbacks(): List<PurchaseCallback> {
+        val all = callbacks.values.toList()
+        callbacks.clear()
+        return all
+    }
+
+    /**
      * 购买整体失败（`onPurchasesFailedToUpdate`）时排空。
      *
      * 只清掉 [PendingPurchase.STATE_LAUNCHED] 的上下文（这些购买根本没发生），

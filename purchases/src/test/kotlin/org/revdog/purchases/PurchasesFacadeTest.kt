@@ -11,6 +11,7 @@ import org.junit.runner.RunWith
 import org.revdog.purchases.customerinfo.CustomerInfo
 import org.revdog.purchases.identity.IdentityManager
 import org.revdog.purchases.networking.ETagManager
+import org.revdog.purchases.support.BillingHarness
 import org.revdog.purchases.support.DirectDispatcher
 import org.revdog.purchases.support.FakeHTTPClient
 import org.revdog.purchases.support.Fixtures
@@ -31,6 +32,15 @@ class PurchasesFacadeTest {
     private lateinit var context: Context
     private lateinit var httpClient: FakeHTTPClient
 
+    /** 同一个实例：「同配置」判定按引用比三个测试注入项，重建一个就不算同配置了。 */
+    private val dispatcher = DirectDispatcher()
+
+    /**
+     * 门面端到端也要有可编程 Billing：真实 `BillingWrapper` 在 Robolectric 里连不上 Play，
+     * 而「联网取 CustomerInfo 之前先补报」之后取 CustomerInfo 会等 `queryPurchases` 的回调。
+     */
+    private val billing = BillingHarness()
+
     @Before
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
@@ -41,6 +51,9 @@ class PurchasesFacadeTest {
     @After
     fun tearDown() {
         Purchases.resetSharedInstance()
+        // `configure` 把 logLevel 写进**进程级**的 `Logger`。不还原就会串到同一个
+        // Robolectric classloader 里的其它测试类去（`DiagnosticsWireParityTest` 断言 INFO）。
+        Purchases.logLevel = LogLevel.INFO
     }
 
     private fun configure(appUserID: String? = null): Purchases {
@@ -49,7 +62,8 @@ class PurchasesFacadeTest {
             .baseURL(FakeHTTPClient.TEST_BASE_URL)
             .logLevel(LogLevel.ERROR)
             .httpClientOverride(httpClient)
-            .dispatcherOverride(DirectDispatcher())
+            .dispatcherOverride(dispatcher)
+            .billingOverride(billing.wrapper)
             .build()
         return Purchases.configure(configuration)
     }
@@ -86,7 +100,7 @@ class PurchasesFacadeTest {
     }
 
     @Test
-    fun `重复 configure 打日志并替换实例`() {
+    fun `配置不同时重复 configure 打日志并替换实例`() {
         val first = configure("user-a")
         idle()
         val second = configure("user-b")
@@ -95,6 +109,29 @@ class PurchasesFacadeTest {
         assertThat(second).isNotSameAs(first)
         assertThat(Purchases.sharedInstance).isSameAs(second)
         assertThat(Purchases.sharedInstance.appUserID).isEqualTo("user-b")
+    }
+
+    /**
+     * 同配置重复 configure → 直接返回已有实例（RC `Purchases.configure` 同款早返回）。
+     *
+     * 宿主在 `Application.onCreate` 与某个 Activity 里各调一次是常态，为此重建实例会白白丢掉
+     * BillingClient 连接、进行中的购买回调与内存缓存。断言挂在 listener 上：
+     * `close()` 会把它置空，listener 还在 = 旧实例根本没被关过。
+     */
+    @Test
+    fun `同配置二次 configure 返回同一实例且不重建`() {
+        val first = configure("user-a")
+        idle()
+        val listener = UpdatedCustomerInfoListener { }
+        first.updatedCustomerInfoListener = listener
+        idle()
+
+        val second = configure("user-a")
+        idle()
+
+        assertThat(second).isSameAs(first)
+        assertThat(Purchases.sharedInstance).isSameAs(first)
+        assertThat(Purchases.sharedInstance.updatedCustomerInfoListener).isSameAs(listener)
     }
 
     @Test
