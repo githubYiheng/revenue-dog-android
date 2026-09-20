@@ -10,8 +10,9 @@
 
 ## [0.1.0] - 未发布
 
-首个版本。**尚未打 tag**：公开仓库 `github.com/githubYiheng/revenue-dog-android` 需用户创建，
-Maven 发布渠道与凭据同样待用户裁定（见 `README.md`「发布」一节）。
+首个版本。**尚未打 tag**（首个 tag 前要跑完真机清单）。分发：公开仓库
+`github.com/githubYiheng/revenue-dog-android` + 自托管 Maven 仓库
+`https://maven.revdog.org/releases`（见 `README.md`「安装」与「发布」两节）。
 
 Play Billing Library **9.1.0** 基线，`minSdk 24` / `compileSdk 36` / JVM 17。
 公开 API 与 iOS SDK 同名同形（三套形态：callback / Kotlin lambda / suspend + Flow）。

@@ -47,17 +47,18 @@ android {
     }
 }
 
-// ---- Maven 发布（M4 **占位**：配置齐、凭据待用户定）----
+// ---- Maven 发布（ADR 0072：自托管静态仓库 `https://maven.revdog.org/releases`）----
 //
 // 坐标 `org.revdog:purchases:<VERSION_NAME>`，POM 元数据在 `gradle.properties` 的 POM_* 段。
 // `afterEvaluate` 是必须的：`components["release"]` 由 AGP 在自己的 afterEvaluate 里才注册
 // （`singleVariant("release")` 决定了只有这一个）。
 //
-// **TODO(user)**：发布渠道（GitHub Packages / Maven Central Portal）、账号、凭据、
-// 以及 Central 需要的 GPG 签名密钥，全部由用户定。三个属性
-// （`revdogMavenUrl` / `revdogMavenUser` / `revdogMavenPassword`）走
-// `~/.gradle/gradle.properties` 或 `-P` 传入，**绝不入库**；缺任一时只注册 mavenLocal，
-// `./gradlew :purchases:publishToMavenLocal` 可以在本地把 aar + sources jar + pom 验一遍。
+// Gradle 这一侧**只发到本地 staging 目录**（`build/maven-staging`，标准 Maven 布局 + 校验和），
+// 不持有任何凭据、不碰网络；上传 R2 由 `scripts/sdk-android-maven-publish.sh` 做，
+// 门禁（版本不可变、与公开仓库 tag 同源、先拉回远端 maven-metadata.xml 再合并）也都在那里。
+// 不引入第三方发布插件：手写 `maven-publish` 足够，少一个要跟 AGP 版本对齐的依赖。
+//   ./gradlew :purchases:publishReleasePublicationToStagingRepository
+//   ./gradlew :purchases:publishToMavenLocal        # 本地宿主联调用
 afterEvaluate {
     publishing {
         publications {
@@ -91,28 +92,11 @@ afterEvaluate {
                 }
             }
         }
-        val repoUrl = project.findProperty("revdogMavenUrl") as String?
-        val repoUser = project.findProperty("revdogMavenUser") as String?
-        val repoPassword = project.findProperty("revdogMavenPassword") as String?
-        if (repoUrl != null && repoUser != null && repoPassword != null) {
-            repositories {
-                maven {
-                    name = "revdog"
-                    url = uri(repoUrl)
-                    credentials {
-                        username = repoUser
-                        password = repoPassword
-                    }
-                }
+        repositories {
+            maven {
+                name = "staging"
+                url = uri(layout.buildDirectory.dir("maven-staging"))
             }
-        } else {
-            // `info` 级而不是 `lifecycle`：这行会在每次 configure 时求值，
-            // 用 lifecycle 会污染 api-check / r8-check 的输出。TODO(user) 的正式提示在
-            // `scripts/sdk-android-release.sh` 的 dry-run 末尾。
-            logger.info(
-                "TODO(user)：未配 revdogMavenUrl / revdogMavenUser / revdogMavenPassword，" +
-                    "只有 publishToMavenLocal 可用（凭据与发布渠道由用户定）",
-            )
         }
     }
 }

@@ -14,11 +14,15 @@ Revenue Dog 的 Android 客户端 SDK：自建 RevenueCat 式内购后端的 Goo
 ## 安装
 
 ```kotlin
-// settings.gradle.kts —— 仓库由用户定（见下文「发布」）
+// settings.gradle.kts
 dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        maven {
+            url = uri("https://maven.revdog.org/releases")
+            content { includeGroup("org.revdog") }   // 只有 org.revdog 的依赖才会问这个仓库
+        }
     }
 }
 
@@ -28,7 +32,10 @@ dependencies {
 }
 ```
 
-> **0.1.0 还没发布到任何 Maven 仓库**（渠道与凭据待用户裁定）。在那之前用源码依赖：
+制品在我方自托管的静态 Maven 仓库（不在 Maven Central），所以上面那段 `maven { … }` 不能省。
+每个制品旁边有 `.sha256` / `.sha512`；要钉校验和的宿主用 Gradle dependency verification。
+
+> **0.1.0 还没发布**（首个 tag 前要跑完真机清单）。在那之前用源码依赖：
 > `includeBuild("…/revenue-dog-android")` 或 `implementation(project(":purchases"))`。
 
 `minifyEnabled true` 的宿主**不需要抄任何 ProGuard 规则** —— 规则随 aar 分发
@@ -201,13 +208,17 @@ bash scripts/sdk-android-release.sh 0.1.0 --apply    # 真推：subtree split �
 tag 远端不存在 · 远端 main fast-forward · **R8 / consumer ProGuard**（第八道，Android 专有，
 iOS 那边没有对应物）。
 
-**待用户裁定（脚本 dry-run 会把它们打印出来）**：
+tag 推上去之后发 Maven 制品（自托管静态仓库，R2 + `maven.revdog.org`）：
 
-1. 公开仓库 `github.com/githubYiheng/revenue-dog-android` 需用户创建（公开，MIT）；
-2. Maven 发布渠道（GitHub Packages 还是 Maven Central Portal）、账号与凭据；
-   Central 还需要 GPG 签名密钥。Gradle 侧配置已就位，凭据走
-   `~/.gradle/gradle.properties` 的 `revdogMavenUrl` / `revdogMavenUser` / `revdogMavenPassword`，
-   **绝不入库**。
+```bash
+bash scripts/sdk-android-maven-publish.sh 0.1.0            # dry-run：门禁 + staging + 列出将上传的对象
+bash scripts/sdk-android-maven-publish.sh 0.1.0 --apply    # 真传
+```
+
+六道门禁：版本号一致 · 工作区干净 · **公开仓库 tag 的树 == `HEAD:sdk/android`**（制品与公开源码同源）·
+**版本不可变**（远端已有该版本即拒）· 先拉回远端 `maven-metadata.xml` 再合并 · staging 产物与校验和齐全。
+Gradle 侧零凭据：`./gradlew :purchases:publishReleasePublicationToStagingRepository` 只写本地
+`purchases/build/maven-staging`。
 
 版本纪律：公开 API 基线 diff 有「减」或「改」= 主版本；只「增」= 次版本；无 diff = 修订。
 破坏性变更必须在 CHANGELOG 写迁移说明。**tag 不可移动。**
