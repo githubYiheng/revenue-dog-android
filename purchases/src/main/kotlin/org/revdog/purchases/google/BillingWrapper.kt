@@ -758,12 +758,23 @@ internal class BillingWrapper(
     }
 
     @VisibleForTesting
-    internal fun acknowledge(token: String, onAcknowledged: (String) -> Unit) {
+    /**
+     * @param onFailed ack 失败时回调（默认只记日志）。A8 自保要靠它释放「按 token 单飞」的占位，
+     * 否则一次失败会把这个 token 的自保卡到进程重启。
+     */
+    internal fun acknowledge(
+        token: String,
+        onFailed: (PurchasesError) -> Unit = {},
+        onAcknowledged: (String) -> Unit,
+    ) {
         Logger.debug { "确认购买（token 哈希 ${token.sha1().take(TOKEN_LOG_PREFIX_LENGTH)}）" }
         AcknowledgePurchaseUseCase(
             useCaseParams = AcknowledgePurchaseUseCaseParams(token, appInBackground),
             onReceive = onAcknowledged,
-            onError = PurchasesErrorCallback { error -> Logger.error { "确认失败，下次前台重试：$error" } },
+            onError = PurchasesErrorCallback { error ->
+                Logger.error { "确认失败，下次前台重试：$error" }
+                onFailed(error)
+            },
             withConnectedClient = { billingClient.withConnectedClientOrWarn(it) },
             executeRequestOnUIThread = { delay, callback -> executeRequestOnUIThread(delay, callback) },
         ).run()

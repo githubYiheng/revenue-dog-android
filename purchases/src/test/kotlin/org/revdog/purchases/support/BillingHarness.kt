@@ -63,6 +63,21 @@ internal class BillingHarness {
     /** `true` = `queryPurchases` 永不回调（模拟 BillingClient 卡在重连退避里、待办一直排队）。 */
     var queryPurchasesNeverResponds: Boolean = false
 
+    /**
+     * `true` = `queryPurchases` 的回调先攒着，等 [flushQueryPurchases] 再放（模拟真机上 BillingClient 的异步回调：
+     * 同一时刻可以有好几个查询在途 —— A8 单飞要靠它才测得出来）。
+     */
+    var deferQueryPurchases: Boolean = false
+    private val deferredQueryCallbacks: MutableList<() -> Unit> = mutableListOf()
+
+    /** 放行一批攒着的 `queryPurchases` 回调；返回放行了几个。回调里新发起的查询留到下一次 flush。 */
+    fun flushQueryPurchases(): Int {
+        val batch = deferredQueryCallbacks.toList()
+        deferredQueryCallbacks.clear()
+        batch.forEach { it() }
+        return batch.size
+    }
+
     /** `queryProductDetailsAsync` 的返回值。 */
     var subscriptionProducts: List<StoreProduct> = emptyList()
     var inAppProducts: List<StoreProduct> = emptyList()
@@ -106,9 +121,16 @@ internal class BillingHarness {
         every { wrapper.queryPurchases(any(), any()) } answers {
             val onSuccess = firstArg<(Map<String, StoreTransaction>) -> Unit>()
             val onError = secondArg<(PurchasesError) -> Unit>()
-            if (!queryPurchasesNeverResponds) {
+            val respond = {
                 queryPurchasesError?.let { onError(it) }
                     ?: onSuccess(purchasesOnDevice.associateBy { it.purchaseToken.sha1() })
+            }
+            if (queryPurchasesNeverResponds) {
+                // 永不回调
+            } else if (deferQueryPurchases) {
+                deferredQueryCallbacks += respond
+            } else {
+                respond()
             }
         }
 
@@ -134,11 +156,16 @@ internal class BillingHarness {
         }
 
         // A8 直接调 `acknowledge`（不经 consumeAndSave）：ack 成功才回调，失败什么都不回。
-        every { wrapper.acknowledge(any(), any()) } answers {
+        every { wrapper.acknowledge(any(), any(), any()) } answers {
             val token = firstArg<String>()
-            val onAcknowledged = secondArg<(String) -> Unit>()
+            val onFailed = secondArg<(PurchasesError) -> Unit>()
+            val onAcknowledged = thirdArg<(String) -> Unit>()
             acknowledgedTokens += token
-            if (acknowledgeSucceeds) onAcknowledged(token)
+            if (acknowledgeSucceeds) {
+                onAcknowledged(token)
+            } else {
+                onFailed(PurchasesError(org.revdog.purchases.PurchasesErrorCode.StoreProblemError, "ack 失败（测试）"))
+            }
         }
 
         every { wrapper.consumePurchase(any(), any()) } answers {

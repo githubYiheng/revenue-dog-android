@@ -24,6 +24,7 @@ import org.revdog.purchases.models.StoreProduct
 import org.revdog.purchases.models.StoreTransaction
 import org.revdog.purchases.models.SubscriptionOption
 import org.revdog.purchases.networking.Backend
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
 
 /**
@@ -169,7 +170,9 @@ internal class PostReceiptHelper(
             onNoTransactionsToSync()
             return
         }
-        Logger.debug { "补报 ${toSync.size} 笔有本地上下文但 queryPurchases 看不到的交易" }
+        // 对照 RC `postRemainingCachedTransactionMetadata`：只滤掉 PENDING，**不滤本轮差集路径刚报过的 token** ——
+        // 刚失败的那笔会在这里立刻再报一次（RC 同款行为，请求由 CallbackCache 合并；2026-09-21 真机日志可见）。
+        Logger.debug { "补报 ${toSync.size} 笔留有本地上下文的交易（含 Play 已看不到的与本轮刚失败的）" }
         val results = ConcurrentLinkedQueue<Result<CustomerInfo>>()
         toSync.forEach { context ->
             performPostReceipt(
@@ -332,6 +335,11 @@ internal class PostReceiptHelper(
         if (context.ackSelfProtected) return
         val elapsed = dateProvider.now().time - context.firstAttemptAtMs
         if (elapsed < ackSelfProtectThresholdMs) return
+        // **按 token 单飞**：回前台时「BillingClient 连上 / 回前台 / 取 CustomerInfo 前顺带」几轮补报并发，
+        // 每轮里同一个 token 还会失败两次（差集 + 残留上下文，RC 同款）→ 不拦的话同一笔会并发查几次、
+        // ack 几次、诊断记几条（2026-09-21 真机 D16：`ack_self_protect_already_acknowledged` ×2）。
+        // 下面每个出口都释放占位；ack 失败也释放，下一轮照常重试。
+        if (!selfProtectInFlight.add(purchaseToken)) return
 
         Logger.warn {
             "这笔购买首次上报已过 ${elapsed / MILLIS_PER_HOUR}h 仍未被后端确认：先自保 ack 防 Google 自动退款（A8）"
@@ -341,24 +349,36 @@ internal class PostReceiptHelper(
                 val transaction = byHashedToken.values.firstOrNull { it.purchaseToken == purchaseToken }
                 if (transaction == null) {
                     Logger.debug { "A8：Play 上已看不到这笔购买，无需 ack" }
+                    selfProtectInFlight.remove(purchaseToken)
                     return@queryPurchases
                 }
                 if (transaction.isAcknowledged) {
                     // 服务端已经代为 ack 了（设计 §8）。只标记，让后端知道这笔的 ack 状态不是它这一次给的。
                     trackSelfProtect(BillingWrapper.DECISION_ACK_SELF_PROTECT_ALREADY_ACKED, elapsed)
                     pendingPurchases.markAckSelfProtected(purchaseToken)
+                    selfProtectInFlight.remove(purchaseToken)
                     return@queryPurchases
                 }
                 trackSelfProtect(BillingWrapper.DECISION_ACK_SELF_PROTECT, elapsed)
-                billing.acknowledge(purchaseToken) {
-                    // 只有 ack **真的成功**才落这个标记（`acknowledge` 失败时这个回调不会被调）。
+                billing.acknowledge(
+                    token = purchaseToken,
+                    onFailed = { selfProtectInFlight.remove(purchaseToken) },
+                ) {
+                    // 只有 ack **真的成功**才落这个标记。
                     pendingPurchases.markAckSelfProtected(purchaseToken)
+                    selfProtectInFlight.remove(purchaseToken)
                     Logger.info { "A8：自保 ack 成功，后续上报会带 acknowledged_by=sdk_timeout" }
                 }
             },
-            onError = { error -> Logger.warn { "A8：查询购买失败，本轮不自保 ack：$error" } },
+            onError = { error ->
+                selfProtectInFlight.remove(purchaseToken)
+                Logger.warn { "A8：查询购买失败，本轮不自保 ack：$error" }
+            },
         )
     }
+
+    /** A8 自保正在进行中的 token（见 [maybeSelfProtectAcknowledge] 的单飞说明）。 */
+    private val selfProtectInFlight: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
     private fun trackSelfProtect(decision: String, elapsedMs: Long) {
         diagnostics.track(

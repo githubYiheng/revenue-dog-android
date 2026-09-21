@@ -8,9 +8,9 @@
 
 ## [Unreleased]
 
-## [0.1.0] - 未发布
+## [0.1.0] - 2026-09-21
 
-首个版本。**尚未打 tag**（首个 tag 前要跑完真机清单）。分发：公开仓库
+首个版本。真机清单 D1–D17 已在 license tester 真机上跑完（含 R8 release 包）。分发：公开仓库
 `github.com/githubYiheng/revenue-dog-android` + 自托管 Maven 仓库
 `https://maven.revdog.org/releases`（见 `README.md`「安装」与「发布」两节）。
 
@@ -34,7 +34,8 @@ Play Billing Library **9.1.0** 基线，`minSdk 24` / `compileSdk 36` / JVM 17�
   PENDING 交易完全跳过；补报三条链路（`queryPurchases` 差集 / `isAutoRenewing` diff / 本地上下文残留）。
 - **ack 权威在服务端**（偏离 RC，设计 §8）：验证成功即由服务端调 Play 的 acknowledge；
   SDK 只在**首次上报满 24 小时仍未被确认**时自保 ack 一次（A8），并在后续上报带
-  `acknowledged_by=sdk_timeout`。**consume 只在 SDK 做。**
+  `acknowledged_by=sdk_timeout`。自保**按 token 单飞**（回前台并发几轮补报时同一笔只查一次、只记一条诊断）。
+  **consume 只在 SDK 做。**
 - **restore / sync**：`restorePurchases`（`initiation_source=restore`）与
   `syncPurchases`（`unsynced_active_purchases`，只上报不碰 Billing）。
 - **Play in-app messages**：扣款失败时 Google 官方的挽回 snackbar。

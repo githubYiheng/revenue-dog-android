@@ -145,6 +145,28 @@ class AckSelfProtectTest {
     }
 
     @Test
+    fun `按 token 单飞：一轮补报里同一笔失败两次、查询又是异步的，自保也只查一次、只记一条诊断`() {
+        // 真机 2026-09-21（D16）：回前台并发几轮补报 + 每轮同一 token 报两次（差集 + 残留上下文，RC 同款），
+        // `queryPurchases` 在真机上是异步的 → 修前同一笔会并发查两次、诊断 `already_acknowledged` 记两条。
+        val rig = Rig(context, PurchasesAreCompletedBy.REVENUE_DOG)
+        rig.buyAndFail(isAcknowledged = true)
+        rig.harness.nowMs += PostReceiptHelper.ACK_SELF_PROTECT_THRESHOLD_MS
+        rig.billing.deferQueryPurchases = true
+
+        rig.retryPost()
+        assertThat(rig.billing.flushQueryPurchases()).isEqualTo(1) // 补报那一轮自己的查询
+        // 两次失败上报只换来**一个**在途的自保查询
+        assertThat(rig.billing.flushQueryPurchases()).isEqualTo(1)
+
+        assertThat(
+            rig.harness.diagnostics.named(DiagnosticsTracker.EVENT_CONSUME_DECISION)
+                .filter { it["decision"] == BillingWrapper.DECISION_ACK_SELF_PROTECT_ALREADY_ACKED },
+        ).hasSize(1)
+        assertThat(rig.harness.pendingPurchases.postContext(rig.token)!!.ackSelfProtected).isTrue()
+        assertThat(rig.billing.acknowledgedTokens).isEmpty()
+    }
+
+    @Test
     fun `ack 失败：不标记、上下文不清，下一轮再试`() {
         val rig = Rig(context, PurchasesAreCompletedBy.REVENUE_DOG)
         rig.buyAndFail()
@@ -153,9 +175,9 @@ class AckSelfProtectTest {
 
         rig.retryPost()
 
-        // 试过了。一轮补报里这个 token 会被上报两次（差集路径 + 「有上下文但 Play 看不到」路径，
-        // M2 的既有行为），ack 失败时两次都会走一遍自保 —— `acknowledgePurchase` 是幂等的，
-        // 同一轮里多调一次无副作用，所以这里只断言「试过」而不是「只试过一次」。
+        // 试过了。一轮补报里这个 token 会被上报两次（差集路径 + 残留上下文路径，RC 同款），ack 失败后
+        // 单飞占位已释放，同一轮的第二次失败会再试一次 —— `acknowledgePurchase` 是幂等的，
+        // 所以这里只断言「试过」而不是「只试过一次」。
         assertThat(rig.billing.acknowledgedTokens).containsOnly(rig.token)
         assertThat(rig.harness.pendingPurchases.postContext(rig.token)!!.ackSelfProtected).isFalse()
         // 下一轮 ack 成功 → 这次标上。
