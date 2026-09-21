@@ -653,15 +653,34 @@ package org.revdog.purchases.customerinfo {
 
 package org.revdog.purchases.models {
 
+  @dev.drewhamilton.poko.Poko public final class OfferPaymentMode {
+    method @InaccessibleFromKotlin public String getName();
+    property public String name;
+    field public static final java.util.List<org.revdog.purchases.models.OfferPaymentMode> ALL;
+    field public static final org.revdog.purchases.models.OfferPaymentMode.Companion Companion;
+    field public static final org.revdog.purchases.models.OfferPaymentMode DISCOUNTED_RECURRING_PAYMENT;
+    field public static final org.revdog.purchases.models.OfferPaymentMode FREE_TRIAL;
+    field public static final org.revdog.purchases.models.OfferPaymentMode SINGLE_PAYMENT;
+  }
+
+  public static final class OfferPaymentMode.Companion {
+    property public java.util.List<org.revdog.purchases.models.OfferPaymentMode> ALL;
+    property public org.revdog.purchases.models.OfferPaymentMode DISCOUNTED_RECURRING_PAYMENT;
+    property public org.revdog.purchases.models.OfferPaymentMode FREE_TRIAL;
+    property public org.revdog.purchases.models.OfferPaymentMode SINGLE_PAYMENT;
+  }
+
   @dev.drewhamilton.poko.Poko public final class Period {
     ctor public Period(int value, org.revdog.purchases.models.Period.Unit unit, String iso8601);
     method public static org.revdog.purchases.models.Period create(String iso8601);
     method @InaccessibleFromKotlin public String getIso8601();
     method @InaccessibleFromKotlin public org.revdog.purchases.models.Period.Unit getUnit();
     method @InaccessibleFromKotlin public int getValue();
+    method @InaccessibleFromKotlin public double getValueInMonths();
     property public String iso8601;
     property public org.revdog.purchases.models.Period.Unit unit;
     property public int value;
+    property public double valueInMonths;
     field public static final org.revdog.purchases.models.Period.Companion Companion;
   }
 
@@ -704,10 +723,20 @@ package org.revdog.purchases.models {
     ctor public PricingPhase(org.revdog.purchases.models.Period billingPeriod, org.revdog.purchases.models.RecurrenceMode recurrenceMode, Integer? billingCycleCount, org.revdog.purchases.models.Price price);
     method @InaccessibleFromKotlin public Integer? getBillingCycleCount();
     method @InaccessibleFromKotlin public org.revdog.purchases.models.Period getBillingPeriod();
+    method @InaccessibleFromKotlin public org.revdog.purchases.models.OfferPaymentMode? getOfferPaymentMode();
     method @InaccessibleFromKotlin public org.revdog.purchases.models.Price getPrice();
     method @InaccessibleFromKotlin public org.revdog.purchases.models.RecurrenceMode getRecurrenceMode();
+    method public org.revdog.purchases.models.Price? pricePerDay();
+    method public org.revdog.purchases.models.Price? pricePerDay(optional java.util.Locale locale);
+    method public org.revdog.purchases.models.Price? pricePerMonth();
+    method public org.revdog.purchases.models.Price? pricePerMonth(optional java.util.Locale locale);
+    method public org.revdog.purchases.models.Price? pricePerWeek();
+    method public org.revdog.purchases.models.Price? pricePerWeek(optional java.util.Locale locale);
+    method public org.revdog.purchases.models.Price? pricePerYear();
+    method public org.revdog.purchases.models.Price? pricePerYear(optional java.util.Locale locale);
     property public Integer? billingCycleCount;
     property public org.revdog.purchases.models.Period billingPeriod;
+    property public org.revdog.purchases.models.OfferPaymentMode? offerPaymentMode;
     property public org.revdog.purchases.models.Price price;
     property public org.revdog.purchases.models.RecurrenceMode recurrenceMode;
   }
@@ -755,6 +784,8 @@ package org.revdog.purchases.models {
   }
 
   @dev.drewhamilton.poko.Poko public final class StoreProduct {
+    method public String? formattedPricePerMonth();
+    method public String? formattedPricePerMonth(optional java.util.Locale locale);
     method @InaccessibleFromKotlin public String? getBasePlanId();
     method @InaccessibleFromKotlin public org.revdog.purchases.models.SubscriptionOption? getDefaultOption();
     method @InaccessibleFromKotlin public String getDescription();
@@ -766,6 +797,14 @@ package org.revdog.purchases.models {
     method @InaccessibleFromKotlin public org.revdog.purchases.models.SubscriptionOptions? getSubscriptionOptions();
     method @InaccessibleFromKotlin public String getTitle();
     method @InaccessibleFromKotlin public org.revdog.purchases.ProductType getType();
+    method public org.revdog.purchases.models.Price? pricePerDay();
+    method public org.revdog.purchases.models.Price? pricePerDay(optional java.util.Locale locale);
+    method public org.revdog.purchases.models.Price? pricePerMonth();
+    method public org.revdog.purchases.models.Price? pricePerMonth(optional java.util.Locale locale);
+    method public org.revdog.purchases.models.Price? pricePerWeek();
+    method public org.revdog.purchases.models.Price? pricePerWeek(optional java.util.Locale locale);
+    method public org.revdog.purchases.models.Price? pricePerYear();
+    method public org.revdog.purchases.models.Price? pricePerYear(optional java.util.Locale locale);
     property public String? basePlanId;
     property public org.revdog.purchases.models.SubscriptionOption? defaultOption;
     property public String description;

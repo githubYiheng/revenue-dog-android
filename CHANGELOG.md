@@ -8,6 +8,60 @@
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-09-21
+
+**只增不改**：公开 API 基线只有新增行（39 行），现有签名与行为一字未动。与 RevenueCat
+purchases-android **10.22.1** 同语义（口径逐字对照其源码与单测，见下）。
+
+### 新增：按周期折算价格
+
+`StoreProduct.pricePerDay/pricePerWeek/pricePerMonth/pricePerYear(locale)`、
+`StoreProduct.formattedPricePerMonth(locale)`、
+`PricingPhase.pricePerDay/pricePerWeek/pricePerMonth/pricePerYear(locale)`、
+`Period.valueInMonths`。`locale` 默认取系统 locale（Java 侧有 `@JvmOverloads` 无参重载）。
+
+折算口径（**改一个字就与 RC 对不上**）：
+
+- **按 period 常量换算，不是日历**：周 = 7 天、月 = 30 天、年 = 365 天。
+  所以 **1 年 = 365 / 7 ≈ 52.142857 周**（不是 52 周），**1 月 = 365 / 12 / 7 ≈ 4.345238 周**
+  （不是 4 周），1 年 = 12 月。
+- 金额 = `amountMicros ÷ 目标周期数`，结果**向零截断**（不是四舍五入）；返回的
+  `Price.amountMicros` 就是这个未舍入值，`currencyCode` 原样带过来。
+- `formatted` 在 `amountMicros` 基础上再按币种的 `defaultFractionDigits` 做一次 **FLOOR**
+  （只向下），然后用 `NumberFormat.getCurrencyInstance(locale)` 渲染。
+- **都是近似值**，只用于展示，不要拿来算钱。
+- `StoreProduct` 上算的是 **base plan**（用 `price` + `period`），**不是 `defaultOption`** ——
+  免费试用 / 折扣阶段一概不参与；要按某个 offer 的某个阶段折算，用 `PricingPhase.pricePerX`。
+- **无法折算返回 `null`**：一次性商品（`period == null`）、周期 ISO 8601 解析不了
+  （`Period.Unit.UNKNOWN`）、币种代码不是合法 ISO 4217。
+
+两处**有意偏离 RC**（都是 fail-loud 方向，签名上表现为 `PricingPhase.pricePerX` 返回可空）：
+
+- 周期单位 `UNKNOWN` 时 RC 把周期数取 `0.0`，`amountMicros / 0.0 = Infinity`，
+  `toLong()` = `Long.MAX_VALUE` —— 屏幕上会出现天文数字的「周价」。我方返回 `null`。
+- 币种代码非法时 RC 让 `Currency.getInstance` 抛 `IllegalArgumentException`（会炸掉付费墙）。
+  我方记一条 error 日志并返回 `null`。
+
+未实现 RC 的 `PricingPhase.formattedPriceInMonths(locale)`：它在 RC 那边一出生就是
+`@Deprecated`（替代品是 `pricePerMonth(locale).formatted`），不值得新增一个已弃用的符号。
+
+### 新增：`PricingPhase.offerPaymentMode` 与 `OfferPaymentMode`
+
+付费墙区分「免费试用 / 预付一期 / 折扣连扣」三种文案的判据。判定逐字对照 RC
+`PricingPhase.offerPaymentMode`：`recurrenceMode != FINITE_RECURRING` → `null`；
+`price.amountMicros == 0` → `FREE_TRIAL`；`billingCycleCount == 1` → `SINGLE_PAYMENT`；
+`> 1` → `DISCOUNTED_RECURRING_PAYMENT`；其余 → `null`。
+
+**偏离 RC**：RC 的 `OfferPaymentMode` 是 public enum，我方守 `ForbiddenPublicEnum`，
+改成 `@Poko class` + companion 常量（`name` 与 RC 的枚举常量名逐字一致，`ALL` 列全三个值）。
+它是本地推导出来的、不从后端下行解析，所以**不带 `UNKNOWN`**，推不出来就是 `null`。
+
+### 修复
+
+- 日志脱敏：`Backend` 合并在飞请求时的 debug 日志原样打印了去重键，而去重键里装着
+  **purchaseToken 原文 + app_user_id + 整个 receiptInfo JSON**。改成只打 `sha1` 前 8 位
+  （与 `BillingWrapper` 打 token 的做法同款）。行为不变，只影响日志。
+
 ## [0.1.0] - 2026-09-21
 
 首个版本。真机清单 D1–D17 已在 license tester 真机上跑完（含 R8 release 包）。分发：公开仓库

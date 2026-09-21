@@ -49,6 +49,7 @@ import org.revdog.purchases.models.StoreTransaction
 import org.revdog.purchases.purchaseWith
 import org.revdog.purchases.restorePurchasesWith
 import org.revdog.purchases.syncPurchasesWith
+import org.revdog.purchases.models.OfferPaymentMode
 import org.revdog.purchases.models.Period
 import org.revdog.purchases.models.Price
 import org.revdog.purchases.models.PricingPhase
@@ -60,6 +61,7 @@ import org.revdog.purchases.offerings.Offering
 import org.revdog.purchases.offerings.Offerings
 import org.revdog.purchases.offerings.Package
 import org.revdog.purchases.offerings.PackageType
+import java.util.Locale
 
 /**
  * Kotlin 侧的公开 API 编译验证（结构对照 RC `api-tester/`）。
@@ -264,6 +266,16 @@ internal object KotlinPurchasesAPI {
         val options: SubscriptionOptions? = product.subscriptionOptions
         val defaultOption: SubscriptionOption? = product.defaultOption
         val id: String = product.id
+        val perDay: Price? = product.pricePerDay()
+        val perWeek: Price? = product.pricePerWeek()
+        val perMonth: Price? = product.pricePerMonth()
+        val perYear: Price? = product.pricePerYear()
+        val perWeekLocalized: Price? = product.pricePerWeek(Locale.US)
+        val perMonthLocalized: Price? = product.pricePerMonth(Locale.US)
+        val perYearLocalized: Price? = product.pricePerYear(Locale.US)
+        val perDayLocalized: Price? = product.pricePerDay(Locale.US)
+        val formattedPerMonth: String? = product.formattedPricePerMonth()
+        val formattedPerMonthLocalized: String? = product.formattedPricePerMonth(Locale.US)
     }
 
     fun checkSubscriptionOptions(options: SubscriptionOptions) {
@@ -303,6 +315,25 @@ internal object KotlinPurchasesAPI {
         val name: String = recurrenceMode.name
         val parsed: RecurrenceMode = RecurrenceMode.fromIdentifier(1)
         val allModes: List<RecurrenceMode> = RecurrenceMode.ALL
+        val paymentMode: OfferPaymentMode? = phase.offerPaymentMode
+        val perDay: Price? = phase.pricePerDay()
+        val perWeek: Price? = phase.pricePerWeek()
+        val perMonth: Price? = phase.pricePerMonth()
+        val perYear: Price? = phase.pricePerYear()
+        val perDayLocalized: Price? = phase.pricePerDay(Locale.US)
+        val perWeekLocalized: Price? = phase.pricePerWeek(Locale.US)
+        val perMonthLocalized: Price? = phase.pricePerMonth(Locale.US)
+        val perYearLocalized: Price? = phase.pricePerYear(Locale.US)
+    }
+
+    fun checkOfferPaymentMode() {
+        val modes: List<OfferPaymentMode> = listOf(
+            OfferPaymentMode.FREE_TRIAL,
+            OfferPaymentMode.SINGLE_PAYMENT,
+            OfferPaymentMode.DISCOUNTED_RECURRING_PAYMENT,
+        )
+        val all: List<OfferPaymentMode> = OfferPaymentMode.ALL
+        val name: String = OfferPaymentMode.FREE_TRIAL.name
     }
 
     fun checkPeriod() {
@@ -312,6 +343,7 @@ internal object KotlinPurchasesAPI {
         val iso8601: String = period.iso8601
         val raw: String = unit.rawValue
         val units: List<Period.Unit> = Period.Unit.ALL
+        val valueInMonths: Double = period.valueInMonths
     }
 
     fun checkPublicTypes() {

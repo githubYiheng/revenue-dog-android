@@ -12,7 +12,7 @@
     "X-Observer-Mode-Enabled": "false",
     "X-Platform": "android",
     "X-Platform-Flavor": "native",
-    "X-Version": "0.1.0"
+    "X-Version": "0.1.1"
   },
   "body": {
     "fetch_token": "token-sub-first",

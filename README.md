@@ -28,14 +28,14 @@ dependencyResolutionManagement {
 
 // build.gradle.kts
 dependencies {
-    implementation("org.revdog:purchases:0.1.0")
+    implementation("org.revdog:purchases:0.1.1")
 }
 ```
 
 制品在我方自托管的静态 Maven 仓库（不在 Maven Central），所以上面那段 `maven { … }` 不能省。
 每个制品旁边有 `.sha256` / `.sha512`；要钉校验和的宿主用 Gradle dependency verification。
 
-> **0.1.0 还没发布**（首个 tag 前要跑完真机清单）。在那之前用源码依赖：
+> 已发布版本见 `CHANGELOG.md`（首个版本 0.1.0，2026-09-21）。要用未发布的改动时走源码依赖：
 > `includeBuild("…/revenue-dog-android")` 或 `implementation(project(":purchases"))`。
 
 `minifyEnabled true` 的宿主**不需要抄任何 ProGuard 规则** —— 规则随 aar 分发
@@ -221,8 +221,8 @@ bash scripts/r8-check.sh                    # consumer ProGuard 门禁（跑 :ex
 ## 发布
 
 ```bash
-bash scripts/sdk-android-release.sh 0.1.0            # dry-run：八道门禁 + 打印将执行的动作
-bash scripts/sdk-android-release.sh 0.1.0 --apply    # 真推：subtree split → main → tag v0.1.0
+bash scripts/sdk-android-release.sh <version>            # dry-run：八道门禁 + 打印将执行的动作
+bash scripts/sdk-android-release.sh <version> --apply    # 真推：subtree split → main → tag v<version>
 ```
 
 八道门禁（任何一条不过就退出，不允许跳过）：语义化版本 + CHANGELOG 条目 · 工作区干净 ·
@@ -233,8 +233,8 @@ iOS 那边没有对应物）。
 tag 推上去之后发 Maven 制品（自托管静态仓库，R2 + `maven.revdog.org`）：
 
 ```bash
-bash scripts/sdk-android-maven-publish.sh 0.1.0            # dry-run：门禁 + staging + 列出将上传的对象
-bash scripts/sdk-android-maven-publish.sh 0.1.0 --apply    # 真传
+bash scripts/sdk-android-maven-publish.sh <version>            # dry-run：门禁 + staging + 列出将上传的对象
+bash scripts/sdk-android-maven-publish.sh <version> --apply    # 真传
 ```
 
 六道门禁：版本号一致 · 工作区干净 · **公开仓库 tag 的树 == `HEAD:sdk/android`**（制品与公开源码同源）·

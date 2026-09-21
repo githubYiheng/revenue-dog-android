@@ -8,6 +8,7 @@ import org.revdog.purchases.PurchasesError
 import org.revdog.purchases.PurchasesErrorCode
 import org.revdog.purchases.common.Delay
 import org.revdog.purchases.common.Dispatcher
+import org.revdog.purchases.common.sha1
 import org.revdog.purchases.PurchasesAreCompletedBy
 import org.revdog.purchases.customerinfo.CustomerInfo
 import org.revdog.purchases.customerinfo.CustomerInfoFactory
@@ -45,7 +46,30 @@ internal class Backend(
 ) {
 
     /** 前后台维度也要进 key：后台请求带抖动，前台不带，两者不能复用同一次在飞的请求。 */
-    internal data class CallbackCacheKey(val parts: List<String>, val appInBackground: Boolean)
+    internal data class CallbackCacheKey(val parts: List<String>, val appInBackground: Boolean) {
+
+        /**
+         * 进日志的脱敏形态。
+         *
+         * `parts` 里装着 **purchaseToken 原文 + app_user_id + 整个 receiptInfo JSON**
+         * （见 `postReceiptData`），直接 `$cacheKey` 打出去等于把购买凭据写进 logcat。
+         * 这里只留 sha1 前 8 位 —— 足够肉眼判断「是不是同一个 key 被合并了」，
+         * 又不泄露任何原文（与 `BillingWrapper` 打 token 的做法同款）。
+         */
+        val redacted: String
+            get() = "CallbackCacheKey(sha1=${parts.joinToString(separator = "|").sha1().take(KEY_LOG_PREFIX_LENGTH)}" +
+                ", background=$appInBackground)"
+
+        /**
+         * data class 默认的 `toString()` 会把 `parts` 原样吐出来。**覆盖掉**，
+         * 让「以后有人手滑写了 `$cacheKey`」也泄不出东西（相等性语义不受影响）。
+         */
+        override fun toString(): String = redacted
+
+        private companion object {
+            const val KEY_LOG_PREFIX_LENGTH = 8
+        }
+    }
 
     @get:Synchronized @set:Synchronized
     @Volatile
@@ -457,9 +481,9 @@ internal class Backend(
      * 同 key 合并。结构对照 RC `Backend.addCallback`：
      * 没有在飞的请求就真发一次，有就把回调挂上去。
      */
-    private fun <K, F> MutableMap<K, MutableList<F>>.addCallback(
+    private fun <F> MutableMap<CallbackCacheKey, MutableList<F>>.addCallback(
         call: AsyncCall,
-        cacheKey: K,
+        cacheKey: CallbackCacheKey,
         functions: F,
         delay: Delay = Delay.NONE,
     ) {
@@ -467,7 +491,8 @@ internal class Backend(
             this[cacheKey] = mutableListOf(functions)
             dispatcher.enqueue(call, delay)
         } else {
-            Logger.debug { "同一请求已在进行中，合并回调：$cacheKey" }
+            // **打 redacted 不打 cacheKey 本身**：key 里有 purchaseToken 原文与 app_user_id。
+            Logger.debug { "同一请求已在进行中，合并回调：${cacheKey.redacted}" }
             this[cacheKey]?.add(functions)
         }
     }

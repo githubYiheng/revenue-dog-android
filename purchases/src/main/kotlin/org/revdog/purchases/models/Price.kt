@@ -1,6 +1,13 @@
 package org.revdog.purchases.models
 
 import dev.drewhamilton.poko.Poko
+import org.revdog.purchases.InternalRevenueDogAPI
+import org.revdog.purchases.Logger
+import org.revdog.purchases.common.pricePerDay
+import org.revdog.purchases.common.pricePerMonth
+import org.revdog.purchases.common.pricePerWeek
+import org.revdog.purchases.common.pricePerYear
+import java.util.Locale
 import kotlin.math.roundToInt
 
 /**
@@ -31,6 +38,62 @@ public class Period(
     /** ISO 8601 原文，例如 `P1M`。上行 `pricing_phases[].billingPeriod` 发的就是它。 */
     public val iso8601: String,
 ) {
+
+    /**
+     * 周期折算成「天」。**近似值**（换算表见下面的 `DAYS_PER_*`，走常量不走日历）。
+     * `UNKNOWN` 单位返回 `0.0` 并记一条 error（RC 同款）。
+     */
+    @property:InternalRevenueDogAPI
+    public val valueInDays: Double
+        get() = when (unit) {
+            Unit.DAY -> value.toDouble()
+            Unit.WEEK -> value * DAYS_PER_WEEK
+            Unit.MONTH -> value * DAYS_PER_MONTH
+            Unit.YEAR -> value * DAYS_PER_YEAR
+            else -> unknownUnitValue("days")
+        }
+
+    /** 周期折算成「周」。**近似值**：1 月 ≈ 4.345238 周、1 年 ≈ 52.142857 周。 */
+    @property:InternalRevenueDogAPI
+    public val valueInWeeks: Double
+        get() = when (unit) {
+            Unit.DAY -> value / DAYS_PER_WEEK
+            Unit.WEEK -> value.toDouble()
+            Unit.MONTH -> value.toDouble() * WEEKS_PER_MONTH
+            Unit.YEAR -> value * WEEKS_PER_YEAR
+            else -> unknownUnitValue("weeks")
+        }
+
+    /**
+     * 周期折算成「月」。**近似值**。
+     *
+     * 这一项在 RC 那边是**不带** `@InternalRevenueCatAPI` 的公开成员（另外三项带），
+     * 我方逐字沿用这个不对称，免得宿主从 RC 迁过来时少一个能用的符号。
+     */
+    public val valueInMonths: Double
+        get() = when (unit) {
+            Unit.DAY -> value / DAYS_PER_MONTH
+            Unit.WEEK -> value / WEEKS_PER_MONTH
+            Unit.MONTH -> value.toDouble()
+            Unit.YEAR -> value * MONTHS_PER_YEAR
+            else -> unknownUnitValue("months")
+        }
+
+    /** 周期折算成「年」。**近似值**。 */
+    @property:InternalRevenueDogAPI
+    public val valueInYears: Double
+        get() = when (unit) {
+            Unit.DAY -> value / DAYS_PER_YEAR
+            Unit.WEEK -> value / WEEKS_PER_YEAR
+            Unit.MONTH -> value / MONTHS_PER_YEAR
+            Unit.YEAR -> value.toDouble()
+            else -> unknownUnitValue("years")
+        }
+
+    private fun unknownUnitValue(target: String): Double {
+        Logger.error { "不认识的周期单位，折算成 $target 时取 0：$unit（iso8601=$iso8601）" }
+        return 0.0
+    }
 
     @Poko
     public class Unit private constructor(public val rawValue: String) {
@@ -158,4 +221,54 @@ public class PricingPhase(
     /** 该阶段重复几个周期。`INFINITE_RECURRING` / `NON_RECURRING` 下为 `null`。 */
     public val billingCycleCount: Int?,
     public val price: Price,
-)
+) {
+
+    /**
+     * `FINITE_RECURRING` 阶段的付费模式 —— 付费墙区分「免费试用 / 预付一期 / 折扣连扣」
+     * 三种文案就看它。判据逐字对照 RC `PricingPhase.offerPaymentMode`：
+     *
+     * 1. `recurrenceMode != FINITE_RECURRING` → `null`（全价的无限续订阶段、预付费阶段都在这里出局）；
+     * 2. `price.amountMicros == 0` → [OfferPaymentMode.FREE_TRIAL]；
+     * 3. `billingCycleCount == 1` → [OfferPaymentMode.SINGLE_PAYMENT]；
+     * 4. `billingCycleCount > 1` → [OfferPaymentMode.DISCOUNTED_RECURRING_PAYMENT]；
+     * 5. 其余（`FINITE_RECURRING` 却没给 `billingCycleCount`）→ `null`。
+     */
+    public val offerPaymentMode: OfferPaymentMode?
+        get() {
+            // billingCycleCount 在 INFINITE_RECURRING / NON_RECURRING 下必为 null，
+            // 但还是先把 recurrenceMode 判掉（RC 原注释同款）。
+            if (recurrenceMode != RecurrenceMode.FINITE_RECURRING) return null
+            val cycles = billingCycleCount
+            return when {
+                price.amountMicros == 0L -> OfferPaymentMode.FREE_TRIAL
+                cycles == 1 -> OfferPaymentMode.SINGLE_PAYMENT
+                cycles != null && cycles > 1 -> OfferPaymentMode.DISCOUNTED_RECURRING_PAYMENT
+                else -> null
+            }
+        }
+
+    /**
+     * 该阶段价格折算成**日**价。口径见 `common/PriceExtensions.kt`（RC 同款，近似值）。
+     * 折算不了（周期单位 `UNKNOWN` / 币种代码非法）返回 `null`。
+     *
+     * @param locale 格式化 `formatted` 用的 locale，默认取系统 locale。
+     */
+    @JvmOverloads
+    public fun pricePerDay(locale: Locale = Locale.getDefault()): Price? =
+        price.pricePerDay(billingPeriod, locale)
+
+    /** 该阶段价格折算成**周**价。例如 `P1M` 的阶段除以 ≈4.345238。折算不了返回 `null`。 */
+    @JvmOverloads
+    public fun pricePerWeek(locale: Locale = Locale.getDefault()): Price? =
+        price.pricePerWeek(billingPeriod, locale)
+
+    /** 该阶段价格折算成**月**价。例如 `P1Y` 的阶段除以 12。折算不了返回 `null`。 */
+    @JvmOverloads
+    public fun pricePerMonth(locale: Locale = Locale.getDefault()): Price? =
+        price.pricePerMonth(billingPeriod, locale)
+
+    /** 该阶段价格折算成**年**价。例如 `P1M` 的阶段乘以 12。折算不了返回 `null`。 */
+    @JvmOverloads
+    public fun pricePerYear(locale: Locale = Locale.getDefault()): Price? =
+        price.pricePerYear(billingPeriod, locale)
+}

@@ -3,6 +3,11 @@ package org.revdog.purchases.models
 import com.android.billingclient.api.ProductDetails
 import dev.drewhamilton.poko.Poko
 import org.revdog.purchases.ProductType
+import org.revdog.purchases.common.pricePerDay
+import org.revdog.purchases.common.pricePerMonth
+import org.revdog.purchases.common.pricePerWeek
+import org.revdog.purchases.common.pricePerYear
+import java.util.Locale
 
 /**
  * 一个可购买的订阅选项（base plan 或 offer）。结构对照 RC `models/SubscriptionOption.kt`。
@@ -154,6 +159,45 @@ public class StoreProduct internal constructor(
      */
     public val id: String
         get() = basePlanId?.let { "$productId$ID_SEPARATOR$it" } ?: productId
+
+    // region 按周期折算价格（结构对照 RC `models/StoreProduct.kt` 的同一组默认方法）
+    //
+    // **算的是 base plan**：用的是 [price] + [period]，也就是这个 StoreProduct 的
+    // base plan 全价阶段 —— **不是** [defaultOption]，免费试用 / 折扣阶段一概不参与
+    // （RC 原话：“For Google subscriptions, this value will use the basePlan to calculate the value.”）。
+    // 要按某个 offer 的某个阶段折算，用 `PricingPhase.pricePerX`。
+    //
+    // 换算与舍入口径见 `common/PriceExtensions.kt`：走 period 常量（1 年 = 365 / 7 ≈ 52.142857 周），
+    // 不是日历周数；金额向零截断；`formatted` 按币种小数位 FLOOR。**都是近似值。**
+    //
+    // 一次性商品（`period == null`）返回 `null`，周期解析不了也返回 `null`。
+
+    /** base plan 价格折算成**日**价。一次性商品 / 折算不了返回 `null`。 */
+    @JvmOverloads
+    public fun pricePerDay(locale: Locale = Locale.getDefault()): Price? =
+        period?.let { price.pricePerDay(it, locale) }
+
+    /** base plan 价格折算成**周**价。例如 `P1M` 除以 ≈4.345238。一次性商品 / 折算不了返回 `null`。 */
+    @JvmOverloads
+    public fun pricePerWeek(locale: Locale = Locale.getDefault()): Price? =
+        period?.let { price.pricePerWeek(it, locale) }
+
+    /** base plan 价格折算成**月**价。例如 `P1Y` 除以 12。一次性商品 / 折算不了返回 `null`。 */
+    @JvmOverloads
+    public fun pricePerMonth(locale: Locale = Locale.getDefault()): Price? =
+        period?.let { price.pricePerMonth(it, locale) }
+
+    /** base plan 价格折算成**年**价。例如 `P1M` 乘以 12。一次性商品 / 折算不了返回 `null`。 */
+    @JvmOverloads
+    public fun pricePerYear(locale: Locale = Locale.getDefault()): Price? =
+        period?.let { price.pricePerYear(it, locale) }
+
+    /** 等价于 `pricePerMonth(locale)?.formatted`（RC 同款便利函数）。 */
+    @JvmOverloads
+    public fun formattedPricePerMonth(locale: Locale = Locale.getDefault()): String? =
+        pricePerMonth(locale)?.formatted
+
+    // endregion
 
     /** 原始 `ProductDetails`。M2 的 `launchBillingFlow` 要用它。 */
     internal var productDetails: ProductDetails? = null

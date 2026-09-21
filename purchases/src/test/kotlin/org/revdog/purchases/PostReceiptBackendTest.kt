@@ -80,6 +80,39 @@ class PostReceiptBackendTest {
     }
 
     @Test
+    fun `合并回调的 debug 日志不含 purchaseToken 原文，也不含 app_user_id`() {
+        // 去重键里装着 purchaseToken + appUserID + 整个 receiptInfo JSON。
+        // 直接把 key 打进 logcat 等于泄露购买凭据（0.1.1 修）。
+        val secretToken = "token-super-secret-abcdefghijklmnop"
+        val captured = mutableListOf<String>()
+        val previousHandler = Logger.handler
+        val previousLevel = Logger.logLevel
+        Logger.handler = object : LogHandler {
+            override fun log(level: LogLevel, message: String, throwable: Throwable?) {
+                captured += message
+            }
+        }
+        Logger.logLevel = LogLevel.VERBOSE
+        try {
+            httpClient.enqueue(200, Fixtures.receiptResponse(mapOf("sub_premium" to false)))
+            post(token = secretToken)
+            post(token = secretToken)
+
+            dispatcher.runAll()
+        } finally {
+            Logger.handler = previousHandler
+            Logger.logLevel = previousLevel
+        }
+
+        assertThat(httpClient.recordedRequests).hasSize(1)
+        val mergeLogs = captured.filter { it.contains("合并回调") }
+        assertThat(mergeLogs).describedAs("合并分支应该记了日志，否则这条用例什么都没守住").hasSize(1)
+        assertThat(captured).noneMatch { it.contains(secretToken) }
+        assertThat(captured).noneMatch { it.contains("user-42") }
+        assertThat(mergeLogs.single()).contains("sha1=")
+    }
+
+    @Test
     fun `同一 token 的 purchase 与 restore 绝不合并（is_restore 影响转移判定）`() {
         httpClient.enqueue(200, Fixtures.receiptResponse(mapOf("sub_premium" to false)))
         httpClient.enqueue(200, Fixtures.receiptResponse(mapOf("sub_premium" to false)))

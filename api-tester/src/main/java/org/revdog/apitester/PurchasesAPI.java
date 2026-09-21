@@ -29,6 +29,7 @@ import org.revdog.purchases.customerinfo.EntitlementInfo;
 import org.revdog.purchases.customerinfo.EntitlementInfos;
 import org.revdog.purchases.customerinfo.NonSubscriptionTransaction;
 import org.revdog.purchases.customerinfo.SubscriptionInfo;
+import org.revdog.purchases.models.OfferPaymentMode;
 import org.revdog.purchases.models.Period;
 import org.revdog.purchases.models.PurchaseState;
 import org.revdog.purchases.models.StoreTransaction;
@@ -46,6 +47,7 @@ import org.revdog.purchases.offerings.PackageType;
 import java.util.Collections;
 import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -275,6 +277,17 @@ final class PurchasesAPI {
         SubscriptionOptions options = product.getSubscriptionOptions();
         SubscriptionOption defaultOption = product.getDefaultOption();
         String id = product.getId();
+
+        Price perDay = product.pricePerDay();
+        Price perWeek = product.pricePerWeek();
+        Price perMonth = product.pricePerMonth();
+        Price perYear = product.pricePerYear();
+        Price perWeekLocalized = product.pricePerWeek(Locale.US);
+        Price perMonthLocalized = product.pricePerMonth(Locale.US);
+        Price perYearLocalized = product.pricePerYear(Locale.US);
+        Price perDayLocalized = product.pricePerDay(Locale.US);
+        String formattedPerMonth = product.formattedPricePerMonth();
+        String formattedPerMonthLocalized = product.formattedPricePerMonth(Locale.US);
     }
 
     static void checkSubscriptionOptions(SubscriptionOptions options) {
@@ -316,6 +329,26 @@ final class PurchasesAPI {
         String name = recurrenceMode.getName();
         RecurrenceMode parsed = RecurrenceMode.fromIdentifier(1);
         List<RecurrenceMode> allModes = RecurrenceMode.ALL;
+
+        OfferPaymentMode paymentMode = phase.getOfferPaymentMode();
+        Price perDay = phase.pricePerDay();
+        Price perWeek = phase.pricePerWeek();
+        Price perMonth = phase.pricePerMonth();
+        Price perYear = phase.pricePerYear();
+        Price perDayLocalized = phase.pricePerDay(Locale.US);
+        Price perWeekLocalized = phase.pricePerWeek(Locale.US);
+        Price perMonthLocalized = phase.pricePerMonth(Locale.US);
+        Price perYearLocalized = phase.pricePerYear(Locale.US);
+    }
+
+    static void checkOfferPaymentMode() {
+        OfferPaymentMode[] modes = {
+                OfferPaymentMode.FREE_TRIAL,
+                OfferPaymentMode.SINGLE_PAYMENT,
+                OfferPaymentMode.DISCOUNTED_RECURRING_PAYMENT,
+        };
+        List<OfferPaymentMode> all = OfferPaymentMode.ALL;
+        String name = OfferPaymentMode.FREE_TRIAL.getName();
     }
 
     static void checkPeriod() {
@@ -323,6 +356,7 @@ final class PurchasesAPI {
         int value = period.getValue();
         Period.Unit unit = period.getUnit();
         String iso8601 = period.getIso8601();
+        double valueInMonths = period.getValueInMonths();
         String raw = unit.getRawValue();
         List<Period.Unit> units = Period.Unit.ALL;
         Period.Unit[] all = {
