@@ -4,7 +4,8 @@ import org.revdog.purchases.PurchasesError
 import org.revdog.purchases.PurchasesErrorCode
 
 /**
- * 失败类诊断事件的**统一原因字段**（0.1.2 新增，契约 `sdk-diagnostics.md` §8）。
+ * 失败类诊断事件的**统一原因字段**（0.1.2 新增，契约 `sdk-diagnostics.md` §8；
+ * `error_class` 的词汇与判定顺序见 §1.3 —— 0.1.3 起全端只有一套）。
  *
  * 起因：2026-09-22 首个真实宿主在生产的走查里出现两条 error 级诊断，两条都停在
  * 「知道失败了，不知道为什么」：
@@ -54,7 +55,7 @@ internal object DiagnosticsErrorFields {
 
     // endregion
 
-    // region error_class 取值
+    // region error_class 取值（**全 SDK 唯一一套词汇**，契约 §1.3）
 
     /** 传输层失败：连不上、断网、DNS 挂了。 */
     const val NETWORK: String = "network"
@@ -62,8 +63,19 @@ internal object DiagnosticsErrorFields {
     /** 传输层失败且底层异常是超时类。与 [NETWORK] 分开是因为两者的排查方向完全不同。 */
     const val TIMEOUT: String = "timeout"
 
-    /** 服务端确实回了一个响应，只是非 2xx。具体是多少看 `status`。 */
-    const val HTTP: String = "http"
+    /**
+     * 401 / 403 —— key 配错了、环境串了、或者 secret key 被塞进了 app。
+     * 与 [CLIENT] / [SERVER] 一起**就是** [DiagnosticsErrorClass] 的原口径：
+     * 0.1.3 把 0.1.2 的 `http` 拆成这三档，两套词汇因此合并成一套
+     * （jobs 不变式 18/19 与 admin `launch-sync` 逐字依赖的取值一个字没变）。
+     */
+    const val AUTH: String = "auth"
+
+    /** 401/403 之外的 4xx：确定性的客户端错误，重试不会有不同结果。 */
+    const val CLIENT: String = "client"
+
+    /** 5xx：服务端侧的失败，可重试。 */
+    const val SERVER: String = "server"
 
     /** Play Billing 侧的失败。具体码位看 `billing_response_code`。 */
     const val BILLING: String = "billing"
@@ -77,8 +89,12 @@ internal object DiagnosticsErrorFields {
     /** 以上都不是。出现得多就说明这张表该补了。 */
     const val UNKNOWN: String = "unknown"
 
-    /** 全集。单测拿它断言 [classify] 不会返回表外的值。 */
-    val ALL_CLASSES: List<String> = listOf(NETWORK, TIMEOUT, HTTP, BILLING, PARSE, CONFIG, UNKNOWN)
+    /**
+     * 全集。单测拿它断言 [classify] 不会返回表外的值。
+     * [DiagnosticsErrorClass] 的四个值（`network` / `auth` / `client` / `server`）是它的子集。
+     */
+    val ALL_CLASSES: List<String> =
+        listOf(NETWORK, TIMEOUT, AUTH, CLIENT, SERVER, BILLING, PARSE, CONFIG, UNKNOWN)
 
     // endregion
 
@@ -98,21 +114,22 @@ internal object DiagnosticsErrorFields {
     )
 
     /**
-     * **唯一**的分类函数（全 SDK 只有这一处推 `error_class` 的新口径）。
+     * **唯一**的分类函数（全 SDK 只有这一处推 `error_class`）。
      *
      * 判定顺序是有讲究的，从「证据最硬」排到「只能靠码位猜」：
      * 1. 带了 Play 的整数响应码 → 板上钉钉是 Billing 链路；
      * 2. 底层异常类名带 Timeout → `timeout`（它的码位也是 `networkError`，必须排在 ③ 前面）；
      * 3. 码位是网络类 → `network`；
-     * 4. 拿到了 HTTP 状态码 → 服务端确实应答了 → `http`（`status` 里有细节，不再细分，
-     *    `receipt_post` 那条**另有一套** `network|server|client|auth`，见 [DiagnosticsErrorClass]）；
+     * 4. 拿到了 HTTP 状态码 → 服务端确实应答了 → 交给 [DiagnosticsErrorClass.from] 分三档
+     *    （401/403 = `auth`、其余 4xx = `client`、5xx = `server`）。**0.1.3 起没有 `http` 这个值**：
+     *    它原本只说「服务端回了个非 2xx」，等于把最有用的那一刀（是鉴权挂了还是后端挂了）留给查询方去切；
      * 5.–7. 剩下的按码位归到 `parse` / `config` / `billing`，都落不上就 `unknown`。
      */
     fun classify(error: PurchasesError): String = when {
         error.billingResponseCode != null -> BILLING
         isTimeout(error) -> TIMEOUT
         error.code in NETWORK_CODES -> NETWORK
-        error.httpStatusCode != null -> HTTP
+        error.httpStatusCode != null -> DiagnosticsErrorClass.from(error.httpStatusCode)
         error.code in PARSE_CODES -> PARSE
         error.code in CONFIG_CODES -> CONFIG
         error.code in BILLING_CODES -> BILLING
@@ -120,12 +137,25 @@ internal object DiagnosticsErrorFields {
     }
 
     /**
+     * **没有响应**时的 `error_class` —— `http_error` 的传输层分支专用
+     * （那条路上根本没有 [PurchasesError]：`HTTPClient` 抛的是原始 `IOException`，
+     * 翻译成码位是上层 `Backend.AsyncCall` 的事）。
+     *
+     * 与 [classify] 的 ②③ 两档同一把尺子：超时和断网在我方全都是 `networkError`，
+     * 只有异常类名能把两者分开。
+     */
+    fun classifyTransport(throwable: Throwable?): String =
+        if (isTimeoutName(throwable?.javaClass?.simpleName)) TIMEOUT else NETWORK
+
+    private fun isTimeout(error: PurchasesError): Boolean = isTimeoutName(error.underlyingCauseName)
+
+    /**
      * `HttpURLConnection` 的超时是 `java.net.SocketTimeoutException`；
      * 别的 HTTP 栈（宿主换实现 / 未来换 OkHttp）会给 `InterruptedIOException` 或
      * `*ConnectTimeoutException`。按类名匹配而不是按消息匹配：消息会随 JDK 与语言变，类名不会。
      */
-    private fun isTimeout(error: PurchasesError): Boolean {
-        val causeName = error.underlyingCauseName ?: return false
+    private fun isTimeoutName(causeName: String?): Boolean {
+        if (causeName == null) return false
         return causeName.contains("Timeout", ignoreCase = true) || causeName == "InterruptedIOException"
     }
 

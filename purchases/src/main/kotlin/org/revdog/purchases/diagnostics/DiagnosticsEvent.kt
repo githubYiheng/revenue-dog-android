@@ -163,8 +163,13 @@ internal object DiagnosticsWarningCode {
 }
 
 /**
- * `receipt_post` / `http_error` 的 `error_class`（契约 §1.3）。
- * 与 iOS `DiagnosticsErrorClass` 逐条同口径 —— 服务端把它提成列做巡检不变式 18。
+ * **HTTP 状态码 → `error_class`** 的唯一映射（契约 §1.3）。
+ * 与 iOS `DiagnosticsErrorClass` 逐条同口径 —— 服务端把它提成列做巡检不变式 18/19。
+ *
+ * `receipt_post` 与 `http_error` 直接用它；[DiagnosticsErrorFields.classify]（其余失败事件）
+ * 在「拿到了状态码」那一档也**委派到这里** —— 0.1.3 起全 SDK 只有一套 `error_class` 词汇，
+ * 同一个状态码在哪个事件上都给同一个答案。这四个值一个字都不许改：
+ * jobs 不变式 18/19 与 admin `launch-sync` 的 failures 分组逐字依赖它们。
  */
 internal object DiagnosticsErrorClass {
     const val NETWORK: String = "network"

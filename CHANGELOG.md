@@ -8,6 +8,87 @@
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-09-22
+
+公开 API 基线（`purchases/api/purchases.api`）**零差异**（`scripts/api-check.sh` 证明）。
+改的是两件事 —— **补发 `http_error` 事件**，以及**把 `error_class` 合并成一套词汇**。
+0.1.2「已知缺口」里留给主代理裁定的那三个事件，这次补掉第一个。
+
+### 新增：`http_error`（契约 §1.3 的记录点，Android 从 0.1.0 起一直没发过）
+
+事件名常量在 `DiagnosticsTracker` 里躺了三个版本，**没有任何地方调它**。后果是 jobs 的巡检
+不变式 19 `sdk_auth_failures` 统计 `http_error`/`receipt_post` 的 401/403，Android 侧只有
+`receipt_post` 那一半在供数 —— 一个把 key 配错的版本，只要用户还没触发购买，线上就看不见。
+
+现在**所有非 receipts 端点**（`GET /v1/subscribers/*`、`/v1/subscribers/*/offerings`、
+`POST /v1/subscribers/identify`、`POST /v1/subscribers/*/attributes`）的非 2xx 各记一条
+（level 恒为 `error`）：
+
+| field | 取值 |
+|---|---|
+| `path` | `Endpoint.diagnosticsPath` —— `app_user_id` 段换成 `*`，**不带查询串**（与 iOS 同一种脱敏） |
+| `status` | HTTP 状态码；**网络层失败时缺省**（缺失容忍，键不进 wire） |
+| `request_id` | 响应头 `X-Request-Id` |
+| `error_class` | 见下；无响应时是 `timeout` / `network` |
+| `backend_code` | 契约 §1.4 错误体里的数值码（7243 / 7503 …） |
+| `duration_ms` | 这一次尝试的耗时 |
+
+**发射点只有一个**：`HTTPClient.performRequest`（对照 iOS `HTTPClient.performRaw` →
+`DiagnosticsRecorder.recordHTTPAttempt`）。`DiagnosticsTracker` 由 `PurchasesFactory` 后置注入
+（`setDiagnostics`）—— Recorder 的 uploader 反过来要用这个 client 发 `/v1/diagnostics/events`，
+构造期闭不了环，iOS 也是同一个办法。
+
+**三种情况一条都不记**，每一条理由都是硬的（端点级声明 `Endpoint.recordsHTTPError`）：
+
+- `POST /v1/receipts`：它每次尝试都已经记了 `receipt_post`（含成功），再记一条就是**双计**，
+  不变式 18/19 的分母会被同一次失败污染两遍；
+- `POST /v1/diagnostics/events`：诊断上传自己失败**绝不**再记诊断事件（会自激成事件雪崩），
+  只在本地计数、成功后补一条 `sdk_warning{diag_upload_failed}`（契约 §6-13）；
+- **304**：那是 ETag 协商命中，缓存正常工作的样子。iOS 没有 ETagManager，所以这一条是 Android
+  独有的分支；本地 payload 读不出来时会带 `refreshETag` 整个重发一次，**那一次是真请求，照记**。
+
+### `error_class` 合并成一套词汇（0.1.2 §8.1 的「两套词汇」作废）
+
+`network | timeout | auth | client | server | billing | parse | config | unknown`。
+判定顺序不变，只把原来的 `http` 一档拆开：
+
+| 证据 | error_class |
+|---|---|
+| 带 Play 的整数响应码 | `billing` |
+| 底层异常类名含 `Timeout` / `InterruptedIOException` | `timeout` |
+| 码位是网络类（`networkError` / `offlineConnectionError`） | `network` |
+| **有 HTTP 状态码** | 401/403 → `auth`；其余 4xx → `client`；5xx → `server` |
+| 码位是解析类 | `parse` |
+| 码位是配置 / 用法类 | `config` |
+| 端上自己判定的 Play 语义错误 | `billing` |
+| 以上都不是 | `unknown` |
+
+「有状态码」那一档**直接委派 `DiagnosticsErrorClass.from`** —— 那三个值就是 `receipt_post`
+的原口径，**`receipt_post` 一个字没改**（jobs 不变式 18、admin `launch-sync` 的 failures 分组
+逐字依赖它们）。合并之后同一个状态码在哪个事件上都给同一个答案，查询不用再先看 `type`。
+
+> ⚠️ **口径变更**：0.1.2 里拿到 `error_class = "http"` 的那些事件（`identity_login` /
+> `sync` / `restore` / `purchase_result` / `customer_info_fetch` / `offerings_fetch` /
+> `attributes_sync`），0.1.3 起改报 `auth` / `client` / `server`。`http` 这个值不再产生。
+> 0.1.2 只在生产存活了一天，后端提列无需迁移。
+
+### 内部实现（不进公开 API）
+
+`Endpoint` 新增 `open val recordsHTTPError`（与 `isPost` 同款声明式策略），
+`PostReceipt` / `PostDiagnosticsEvents` 各自覆写成 `false`。
+`HTTPClient` 新增一个带默认值的 `dateProvider` 参数（量 `duration_ms`）与 `setDiagnostics`。
+`DiagnosticsErrorFields` 去掉 `HTTP`、增加 `AUTH` / `CLIENT` / `SERVER`，
+新增 `classifyTransport(throwable)`（没有响应、也没有 `PurchasesError` 的那条路专用）。
+
+### 与 iOS 的差异（都在这里登记）
+
+- iOS 的 `http_error` 带 `attempt`，我方不带：Android 的 HTTP 层**不做重试**（考古 §2.12），
+  `attempt` 恒为 1，没有信息量。
+- iOS 带 `error_code`（值是 `String(backend code)`），我方带 **`backend_code`（int）** ——
+  契约 §8 定的就是这个名字和类型。**待主代理裁定**是否要为跨端同键查询补一个 `error_code`。
+- iOS 的传输层失败一律 `network`（它的 `DiagnosticsErrorClass.from(nil)`），我方分
+  `timeout` / `network`：超时和断网的排查方向完全不同，而 Android 两者的码位都是 `networkError`。
+
 ## [0.1.2] - 2026-09-22
 
 **只增字段**：公开 API 基线（`purchases/api/purchases.api`）**零差异**（`scripts/api-check.sh` 证明），

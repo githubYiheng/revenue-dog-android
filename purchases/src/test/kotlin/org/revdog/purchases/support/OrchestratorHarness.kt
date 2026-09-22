@@ -91,6 +91,8 @@ internal class OrchestratorHarness(
         ETagManager(context, payloadStore = eTagPayloadStore).also { it.clearCaches() }
 
     val httpClient: FakeHTTPClient = FakeHTTPClient(appConfig, eTagManager)
+        // 与生产 `create` 一致：`http_error` 的记录点在 HTTP 层，后置注入。
+        .also { it.diagnostics = diagnostics }
 
     /** 可变的「现在」：A8 用例要把时钟往前推 24h。 */
     var nowMs: Long = now.time

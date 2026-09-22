@@ -24,6 +24,18 @@ internal sealed class Endpoint(
     open val isPost: Boolean get() = false
 
     /**
+     * 非 2xx 时是否补一条 `http_error` 诊断（契约 §1.3 的记录点：「非 receipts 端点的非 2xx」）。
+     *
+     * 只有两个端点是 `false`，理由各自独立（与 iOS `recordHTTPAttempt` 的头两个分支逐条同口径）：
+     * - [PostReceipt] 每次尝试都已经记了 `receipt_post`（含成功），再记一条就是**双计**，
+     *   不变式 18/19 的分母会被同一次失败污染两遍；
+     * - [PostDiagnosticsEvents] 是诊断上传自己 —— 为它记事件会**自激**
+     *   （上传失败 → 记一条 → 下次连它一起传 → 再失败 → 再记）。上传失败只在本地计数，
+     *   成功之后补一条 `sdk_warning{diag_upload_failed}`（契约 §6-13）。
+     */
+    open val recordsHTTPError: Boolean get() = true
+
+    /**
      * 进日志 / 诊断的**脱敏路径**：`app_user_id` 段一律换成 `*`（可能是宿主 uid，不进字段）。
      */
     abstract val diagnosticsPath: String
@@ -59,6 +71,9 @@ internal sealed class Endpoint(
         override val path: String get() = "/v1/receipts"
         override val isPost: Boolean get() = true
         override val diagnosticsPath: String get() = path
+
+        /** 它有自己的 `receipt_post`（成功也记），再发 `http_error` = 双计。 */
+        override val recordsHTTPError: Boolean get() = false
     }
 
     /** `POST /v1/subscribers/{app_user_id}/attributes`（契约 §2.4）。M3。 */
@@ -74,6 +89,9 @@ internal sealed class Endpoint(
         override val path: String get() = "/v1/diagnostics/events"
         override val isPost: Boolean get() = true
         override val diagnosticsPath: String get() = path
+
+        /** 诊断上传自己失败**绝不**再记诊断事件（否则自激成事件雪崩）。 */
+        override val recordsHTTPError: Boolean get() = false
     }
 
     companion object {

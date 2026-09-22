@@ -110,6 +110,13 @@ internal class DiagnosticsRig(
         startsPeriodicFlush = startsPeriodicFlush,
     )
 
+    init {
+        // 与生产 `create` 一致：`http_error` 的记录点在 HTTP 层。
+        // `/v1/diagnostics/events` 自己被 `Endpoint.recordsHTTPError = false` 挡掉，
+        // 所以上传失败**不会**再生出一条事件（自激是这条管线最致命的失败模式）。
+        httpClient.diagnostics = recorder
+    }
+
     val queueFile: File get() = File(directory, DiagnosticsQueue.QUEUE_FILE_NAME)
 
     fun events(): List<DiagnosticsEvent> = queue.allEvents()

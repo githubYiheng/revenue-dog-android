@@ -28,7 +28,7 @@ dependencyResolutionManagement {
 
 // build.gradle.kts
 dependencies {
-    implementation("org.revdog:purchases:0.1.2")
+    implementation("org.revdog:purchases:0.1.3")
 }
 ```
 

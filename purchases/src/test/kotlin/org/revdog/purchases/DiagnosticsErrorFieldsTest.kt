@@ -8,6 +8,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.revdog.purchases.customerinfo.CustomerInfo
+import org.revdog.purchases.diagnostics.DiagnosticsErrorClass
 import org.revdog.purchases.diagnostics.DiagnosticsErrorFields
 import org.revdog.purchases.diagnostics.DiagnosticsEvent
 import org.revdog.purchases.diagnostics.DiagnosticsLevel
@@ -25,6 +26,8 @@ import org.revdog.purchases.support.purchaseFixture
 import org.revdog.purchases.support.withMockDetails
 import org.robolectric.RobolectricTestRunner
 import java.io.File
+import java.io.IOException
+import java.io.InterruptedIOException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 
@@ -35,8 +38,12 @@ import java.net.UnknownHostException
  * `purchaseNotAllowedError`（背后是三个 Play 响应码之一，分不出），
  * `identity_login` 只报了 `unknownBackendError`（没有 `status`，判不了是谁回的）。
  *
- * 本文件锁住三件事：[DiagnosticsErrorFields.classify] 的七个分支各一例、
+ * 本文件锁住三件事：[DiagnosticsErrorFields.classify] 的每个分支各一例、
  * 两条真实失败链路带上了新字段、以及新字段不会突破截断/体积上限、不会带出凭据。
+ *
+ * 0.1.3 把 `error_class` 合并成一套词汇：原来的 `http` 拆成 `auth` / `client` / `server`
+ * （= `receipt_post` 的原口径，那三个值一个字没改），于是 `classify` 在「有状态码」那一档
+ * 直接委派 [DiagnosticsErrorClass.from]。
  */
 @RunWith(RobolectricTestRunner::class)
 class DiagnosticsErrorFieldsTest {
@@ -104,14 +111,65 @@ class DiagnosticsErrorFieldsTest {
     }
 
     @Test
-    fun `error_class http：服务端确实回了非 2xx`() {
+    fun `error_class server：5xx`() {
         val error = PurchasesError(
             PurchasesErrorCode.UnknownBackendError,
             "unavailable",
             backendCode = 7503,
             httpStatusCode = 503,
         )
-        assertThat(DiagnosticsErrorFields.classify(error)).isEqualTo(DiagnosticsErrorFields.HTTP)
+        assertThat(DiagnosticsErrorFields.classify(error)).isEqualTo(DiagnosticsErrorFields.SERVER)
+    }
+
+    @Test
+    fun `error_class auth：401 与 403`() {
+        listOf(401, 403).forEach { status ->
+            val error = PurchasesError(
+                PurchasesErrorCode.InvalidCredentialsError,
+                "invalid credentials",
+                backendCode = 7243,
+                httpStatusCode = status,
+            )
+            assertThat(DiagnosticsErrorFields.classify(error))
+                .describedAs("status $status")
+                .isEqualTo(DiagnosticsErrorFields.AUTH)
+        }
+    }
+
+    @Test
+    fun `error_class client：401 403 之外的 4xx`() {
+        val error = PurchasesError(
+            PurchasesErrorCode.UnexpectedBackendResponseError,
+            "bad request",
+            backendCode = 7400,
+            httpStatusCode = 400,
+        )
+        assertThat(DiagnosticsErrorFields.classify(error)).isEqualTo(DiagnosticsErrorFields.CLIENT)
+    }
+
+    @Test
+    fun `有状态码时 classify 与 receipt_post 的口径逐字相同`() {
+        // 0.1.3 合并词汇的全部意义：同一个状态码在哪个事件上都给同一个答案。
+        // 这条断言塌了就说明两套口径又分叉了。
+        listOf(400, 401, 403, 404, 409, 429, 500, 503).forEach { status ->
+            val error = PurchasesError(PurchasesErrorCode.UnknownBackendError, "x", httpStatusCode = status)
+            assertThat(DiagnosticsErrorFields.classify(error))
+                .describedAs("status $status")
+                .isEqualTo(DiagnosticsErrorClass.from(status))
+        }
+    }
+
+    @Test
+    fun `classifyTransport：没有响应时只会是 timeout 或 network`() {
+        assertThat(DiagnosticsErrorFields.classifyTransport(SocketTimeoutException("read timed out")))
+            .isEqualTo(DiagnosticsErrorFields.TIMEOUT)
+        assertThat(DiagnosticsErrorFields.classifyTransport(InterruptedIOException("interrupted")))
+            .isEqualTo(DiagnosticsErrorFields.TIMEOUT)
+        assertThat(DiagnosticsErrorFields.classifyTransport(UnknownHostException("api.revdog.test")))
+            .isEqualTo(DiagnosticsErrorFields.NETWORK)
+        assertThat(DiagnosticsErrorFields.classifyTransport(IOException("connection reset")))
+            .isEqualTo(DiagnosticsErrorFields.NETWORK)
+        assertThat(DiagnosticsErrorFields.classifyTransport(null)).isEqualTo(DiagnosticsErrorFields.NETWORK)
     }
 
     @Test
@@ -143,13 +201,20 @@ class DiagnosticsErrorFieldsTest {
     }
 
     @Test
-    fun `classify 对全部码位都只返回表内的七个值`() {
+    fun `classify 对全部码位都只返回表内的九个值`() {
         PurchasesErrorCode.ALL.forEach { code ->
             assertThat(DiagnosticsErrorFields.classify(PurchasesError(code)))
                 .describedAs("码位 ${code.name}")
                 .isIn(DiagnosticsErrorFields.ALL_CLASSES)
         }
-        assertThat(DiagnosticsErrorFields.ALL_CLASSES).hasSize(7).doesNotHaveDuplicates()
+        assertThat(DiagnosticsErrorFields.ALL_CLASSES).hasSize(9).doesNotHaveDuplicates()
+        // `receipt_post` 的四值是它的子集 —— 合并成一套词汇的定义就是这句。
+        assertThat(DiagnosticsErrorFields.ALL_CLASSES).contains(
+            DiagnosticsErrorClass.NETWORK,
+            DiagnosticsErrorClass.AUTH,
+            DiagnosticsErrorClass.CLIENT,
+            DiagnosticsErrorClass.SERVER,
+        )
     }
 
     @Test
@@ -246,7 +311,8 @@ class DiagnosticsErrorFieldsTest {
         // 0.1.2 补的：没有这三个就判不出是边缘层还是我方 API。
         assertThat(failed[DiagnosticsErrorFields.KEY_STATUS]).isEqualTo(503)
         assertThat(failed[DiagnosticsErrorFields.KEY_BACKEND_CODE]).isEqualTo(7503)
-        assertThat(failed[DiagnosticsErrorFields.KEY_ERROR_CLASS]).isEqualTo(DiagnosticsErrorFields.HTTP)
+        // 0.1.3：原来的 `http` 拆成了 auth / client / server 三档。
+        assertThat(failed[DiagnosticsErrorFields.KEY_ERROR_CLASS]).isEqualTo(DiagnosticsErrorFields.SERVER)
         assertThat(failed[DiagnosticsErrorFields.KEY_UNDERLYING]).isEqualTo("upstream unavailable")
         assertThat(failed["request_id"]).isEqualTo("req-test")
     }

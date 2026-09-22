@@ -5,7 +5,12 @@ import org.json.JSONObject
 import org.revdog.purchases.Logger
 import org.revdog.purchases.common.AppConfig
 import org.revdog.purchases.common.Config
+import org.revdog.purchases.common.DateProvider
+import org.revdog.purchases.common.DefaultDateProvider
 import org.revdog.purchases.common.filterNotNullValues
+import org.revdog.purchases.diagnostics.DiagnosticsErrorClass
+import org.revdog.purchases.diagnostics.DiagnosticsErrorFields
+import org.revdog.purchases.diagnostics.DiagnosticsTracker
 import java.io.BufferedWriter
 import java.io.IOException
 import java.io.InputStream
@@ -35,7 +40,18 @@ import java.util.Date
 internal open class HTTPClient(
     private val appConfig: AppConfig,
     private val eTagManager: ETagManager,
+    private val dateProvider: DateProvider = DefaultDateProvider(),
 ) {
+
+    /**
+     * 客户端诊断（`sdk-diagnostics.md` §1.3：`http_error` 的**唯一**记录点）。
+     *
+     * **后置注入**，由 `PurchasesFactory.create` 在任何请求发生前赋一次
+     * （对照 iOS `HTTPClient.setDiagnostics`）：Recorder 的 uploader 反过来要用本 client 发
+     * `/v1/diagnostics/events`，构造期闭不了环。赋值之前记录点是哑的 ——
+     * 那正好是「configure 还没跑完、一个请求都发不出去」的那段时间。
+     */
+    var diagnostics: DiagnosticsTracker? = null
 
     /**
      * 同步发一次请求。
@@ -51,7 +67,15 @@ internal open class HTTPClient(
     ): HTTPResult {
         val request = buildRequest(endpoint, body, refreshETag)
         Logger.debug { "→ ${request.method} ${endpoint.diagnosticsPath}" }
-        val result = executeRequest(request)
+        val startedAtMs = dateProvider.now().time
+        val result = try {
+            executeRequest(request)
+        } catch (e: IOException) {
+            // 没有响应：`status` 缺省，靠异常类名分 timeout / network。
+            trackHTTPError(endpoint, result = null, throwable = e, startedAtMs = startedAtMs)
+            throw e
+        }
+        trackHTTPError(endpoint, result, throwable = null, startedAtMs = startedAtMs)
 
         if (!endpoint.usesETag) return result
 
@@ -148,6 +172,43 @@ internal open class HTTPClient(
 
     fun clearCaches() {
         eTagManager.clearCaches()
+    }
+
+    /**
+     * `http_error`（契约 §1.3）。**发射点只有这一个** —— 散到各调用方去写，
+     * 迟早会有一个端点漏记，或者把 `app_user_id` 原样拼进 `path`。
+     * `path` 取 [Endpoint.diagnosticsPath]：`app_user_id` 段已经换成 `*`，也没有查询串。
+     *
+     * [result] 为 `null` = 传输层失败（根本没有响应）：`status` / `request_id` / `backend_code`
+     * 全部缺省（契约「fields 全部可选，缺失容忍」），`error_class` 只能靠 [throwable] 的
+     * 类名分 `timeout` / `network`。
+     *
+     * **2xx 与 304 都不记**：304 是 ETag 协商命中，是缓存正常工作的样子，不是错误
+     * （iOS 没有 ETagManager，那边的 `recordHTTPAttempt` 因此没有这一条分支）。
+     * 本地 payload 读不出来时上面会带 `refreshETag = true` 整个重发一次 ——
+     * 那一次是真请求，走的是同一条记录路径。
+     */
+    @Suppress("ReturnCount")
+    private fun trackHTTPError(endpoint: Endpoint, result: HTTPResult?, throwable: Throwable?, startedAtMs: Long) {
+        if (!endpoint.recordsHTTPError) return
+        if (result != null && (result.isSuccessful() || result.responseCode == RDHTTPStatusCodes.NOT_MODIFIED)) return
+        val tracker = diagnostics ?: return
+        val errorClass = if (result != null) {
+            DiagnosticsErrorClass.from(result.responseCode)
+        } else {
+            DiagnosticsErrorFields.classifyTransport(throwable)
+        }
+        tracker.track(
+            DiagnosticsTracker.EVENT_HTTP_ERROR,
+            mapOf(
+                "path" to endpoint.diagnosticsPath,
+                DiagnosticsErrorFields.KEY_STATUS to result?.responseCode,
+                "request_id" to result?.requestId,
+                DiagnosticsErrorFields.KEY_ERROR_CLASS to errorClass,
+                DiagnosticsErrorFields.KEY_BACKEND_CODE to result?.backendErrorCode,
+                "duration_ms" to (dateProvider.now().time - startedAtMs),
+            ),
+        )
     }
 
     private fun openConnection(request: HTTPRequest): HttpURLConnection =

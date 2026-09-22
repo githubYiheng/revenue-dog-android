@@ -114,6 +114,10 @@ internal object PurchasesFactory {
             ownedThread = diagnosticsThread,
         )
         val diagnostics: DiagnosticsTracker = diagnosticsRecorder
+        // `http_error` 的记录点在 HTTP 层，而 Recorder 的 uploader 反过来要用这个 client
+        // 发 `/v1/diagnostics/events` —— 构造期闭不了环，只能在这里后置注入一次
+        // （对照 iOS `Purchases.start()` 里的 `httpClient.setDiagnostics(_:)`）。
+        httpClient.diagnostics = diagnostics
 
         val attributesManager = SubscriberAttributesManager(
             cache = SubscriberAttributesCache(
