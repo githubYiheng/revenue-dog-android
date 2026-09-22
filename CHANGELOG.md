@@ -8,6 +8,76 @@
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-09-22
+
+**只增字段**：公开 API 基线（`purchases/api/purchases.api`）**零差异**（`scripts/api-check.sh` 证明），
+既有字段的取值与全部运行时行为一字未动。改的只有一件事 —— **失败类诊断事件多带几个原因字段**。
+
+### 为什么
+
+2026-09-22 首个真实宿主在生产的走查里出现两条 error 级诊断，两条都停在「知道失败了，不知道为什么」：
+
+- `sync` 失败 `error_code=purchaseNotAllowedError`。这**一个**码位同时对应 Play 的
+  `BILLING_UNAVAILABLE` / `ITEM_NOT_OWNED` / `FEATURE_NOT_SUPPORTED`，事件里既没有原始响应码
+  也没有 `debugMessage`，到此为止。
+- `identity_login` 失败 `error_code=unknownBackendError`。任意非 2xx 都落这个码位，
+  没有 `status` 就判断不了是边缘层响应还是我方 API。
+
+放量期的一等指标「首启自动同步成功率」要的是**原因分布**，不是比例。
+
+### 新增：失败诊断的统一原因字段
+
+新增内部工具 `DiagnosticsErrorFields`（`of()` 交字段、`classify()` 定 `error_class`，
+**全 SDK 只有这一个分类函数**）。各失败记录点新增的 fields：
+
+| 事件 | 新增 fields |
+|---|---|
+| `identity_login` / `identity_logout`（失败） | `status`、`backend_code`、`error_class`、`underlying`、`request_id`、`billing_response_code`、`billing_debug_message` |
+| `sync` / `restore`（`outcome=failed`） | `backend_code`、`error_class`、`underlying`、`billing_response_code`、`billing_debug_message` |
+| `purchase_result`（`outcome=failed\|cancelled`） | `status`、`backend_code`、`error_class`、`underlying`、`billing_response_code`、`billing_debug_message` |
+| `customer_info_fetch` / `offerings_fetch`（失败） | `backend_code`、`error_class`、`underlying`、`billing_response_code`、`billing_debug_message` |
+| `attributes_sync`（`outcome=rejected\|retryable`） | `backend_code`、`error_class`、`underlying`、`billing_response_code`、`billing_debug_message` |
+| `receipt_post`（失败） | `backend_code`、`underlying` |
+| `billing_purchase_update` | `billing_response_code`、`billing_debug_message` |
+
+- `status` 用的是 wire 契约的提列名 **`status`**（不是 `http_status`）；`receipt_post` 的
+  `http_status` 别名照旧保留。
+- `underlying` = `PurchasesError.underlyingErrorMessage`，与全部字符串字段一样截 **200**。
+- `billing_response_code` / `billing_debug_message` 的**键名逐字取自 RC**
+  purchases-android 10.22.1 `common/diagnostics/DiagnosticsTracker.kt` 的
+  `BILLING_RESPONSE_CODE` / `BILLING_DEBUG_MESSAGE`（RC 在 6 个 Google 事件上都带这两个）。
+  RC 的错误文案键叫 `error_message`，我方叫 `underlying` —— 契约 §1.3 里 "message" 专指后端响应体，
+  两个概念不同名。`error_class` 是我方独有，RC 无对等物。
+
+### `error_class` 的新口径（只用在原来没有这个字段的事件上）
+
+`network` / `timeout` / `http` / `billing` / `parse` / `config` / `unknown`，判定顺序从「证据最硬」排起：
+带 Play 响应码 → `billing`；底层异常类名含 Timeout → `timeout`；码位是网络类 → `network`；
+有 HTTP 状态码 → `http`；其余按码位归 `parse` / `config` / `billing`；都落不上 → `unknown`。
+
+> ⚠️ **`receipt_post` 的 `error_class` 没有动**，仍是契约 §1.3 的四值口径
+> （`network|server|client|auth`）—— jobs 的巡检不变式 18 与 admin 的 `launch-sync`
+> failures 分组逐字依赖它的取值。于是 `error_class` 这一列在后端**按事件类型有两套词汇**，
+> 查询时要看 `type`。
+
+### 内部实现（不进公开 API）
+
+`PurchasesError` 增加三个 **`internal`** 的诊断附注：`billingResponseCode`、`billingDebugMessage`、
+`underlyingCauseName`。它们在主构造之外，所以 `@Poko` 的 `equals` / `hashCode` 不看它们，
+手写的 `toString()` 也不打它们 —— **宿主看到的错误对象与 0.1.1 逐字相同**，metalava 基线零差异。
+
+`billingResponseToPurchasesError` 增加一个带默认值的 `debugMessage` 参数；
+`Backend.AsyncCall` 的两个 catch 分支带上异常类名（超时与断网的码位都是 `networkError`，
+只有类名能把两者分开）；`toPurchasePostingError`（网络失败 → 901）把附注搬过去，
+不让原因在包装那一刻丢掉。
+
+### 已知缺口（本次**没有**动，留给主代理裁定）
+
+`http_error` / `billing_connection` / `billing_query` 三个事件名在 `DiagnosticsTracker` 里有常量，
+但 Android SDK **从未发过**它们。补上等于新开事件流（改行为、改量），超出「只增字段」的范围。
+副作用之一：jobs 的不变式 19 `sdk_auth_failures` 统计 `http_error`/`receipt_post` 的 401/403，
+Android 侧目前只有 `receipt_post` 那一半在供数。
+
 ## [0.1.1] - 2026-09-21
 
 **只增不改**：公开 API 基线只有新增行（39 行），现有签名与行为一字未动。与 RevenueCat

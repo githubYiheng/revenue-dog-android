@@ -126,6 +126,66 @@ public class PurchasesError @JvmOverloads constructor(
     public val message: String
         get() = underlyingErrorMessage ?: code.name
 
+    // region 诊断附注（0.1.2 新增）
+
+    /*
+     * 下面三个字段是**只给诊断用的附注**，故意放在主构造之外：
+     *
+     * - `internal` 不进 metalava 基线 —— 公开 API 一字不动（`scripts/api-check.sh` diff 为空）；
+     * - `@Poko` 只看主构造的属性，`equals` / `hashCode` / 生成的 `toString` 因此都不受影响；
+     * - 这里手写的 [toString] 也不打它们：宿主看到的错误文案与 0.1.1 逐字相同。
+     *
+     * 为什么需要它们：0.1.1 的失败诊断只剩一个 `error_code`，而一个码位往往对应多个原因 ——
+     * `purchaseNotAllowedError` 同时是 `BILLING_UNAVAILABLE` / `ITEM_NOT_OWNED` /
+     * `FEATURE_NOT_SUPPORTED`，`unknownBackendError` 则是任意 5xx。放量期要的是原因分布，
+     * 不是比例，所以把「原始响应码」一路带到记录点。
+     */
+
+    /** `BillingClient.BillingResponseCode` 的**整数**值（Billing 链路映射出来的错误才有）。 */
+    internal var billingResponseCode: Int? = null
+        private set
+
+    /**
+     * `BillingResult.debugMessage` 原文。截断交给诊断层统一做
+     * （`DiagnosticsEvent.MAX_FIELD_STRING_LENGTH`，全 SDK 只有那一个截断点）。
+     */
+    internal var billingDebugMessage: String? = null
+        private set
+
+    /**
+     * 底层异常的**类名**（如 `SocketTimeoutException`）。
+     * 这是 `error_class` 区分 `timeout` 与 `network` 的唯一依据 ——
+     * 两者的 `code` 都是 `networkError`，光看码位分不出「超时」还是「断网」。
+     */
+    internal var underlyingCauseName: String? = null
+        private set
+
+    /** Billing 层映射出错误的那一刻调一次。返回 `this`，方便 `return … .withBillingResult(r)`。 */
+    internal fun withBillingResult(responseCode: Int, debugMessage: String?): PurchasesError = apply {
+        billingResponseCode = responseCode
+        billingDebugMessage = debugMessage
+    }
+
+    /** 传输层异常翻译成错误的那一刻调一次。 */
+    internal fun withCause(throwable: Throwable): PurchasesError = apply {
+        underlyingCauseName = throwable.javaClass.simpleName
+    }
+
+    /**
+     * 把附注从**被包装的**错误搬过来。
+     *
+     * 链路里有几处会把一个错误重新包成另一个码位（最典型的是
+     * `toPurchasePostingError`：网络超时 → 901）。不搬的话附注在包装那一刻就丢了，
+     * 诊断里又会退回「只有一个 error_code」。
+     */
+    internal fun inheritDiagnosticsAnnex(from: PurchasesError): PurchasesError = apply {
+        billingResponseCode = from.billingResponseCode
+        billingDebugMessage = from.billingDebugMessage
+        underlyingCauseName = from.underlyingCauseName
+    }
+
+    // endregion
+
     override fun toString(): String = buildString {
         append("[").append(code).append("] ").append(message)
         backendCode?.let { append(" backend_code=").append(it) }

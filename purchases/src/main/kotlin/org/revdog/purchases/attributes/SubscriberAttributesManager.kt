@@ -6,6 +6,7 @@ import org.revdog.purchases.PurchasesError
 import org.revdog.purchases.common.DateProvider
 import org.revdog.purchases.common.DefaultDateProvider
 import org.revdog.purchases.common.Dispatcher
+import org.revdog.purchases.diagnostics.DiagnosticsErrorFields
 import org.revdog.purchases.diagnostics.DiagnosticsTracker
 import org.revdog.purchases.diagnostics.DiagnosticsWarningCode
 import java.util.concurrent.atomic.AtomicBoolean
@@ -265,11 +266,9 @@ internal class SubscriberAttributesManager(
                 } else {
                     DiagnosticsTracker.OUTCOME_RETRYABLE
                 },
-                "error_code" to error.code.name,
-                "status" to error.httpStatusCode,
                 "request_id" to error.requestId,
                 "attribute_error_count" to attributeErrors.size,
-            ),
+            ) + DiagnosticsErrorFields.of(error),
         )
     }
 

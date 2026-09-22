@@ -17,6 +17,7 @@ import org.revdog.purchases.common.DefaultDateProvider
 import org.revdog.purchases.customerinfo.CustomerInfo
 import org.revdog.purchases.customerinfo.CustomerInfoUpdateHandler
 import org.revdog.purchases.diagnostics.DiagnosticsErrorClass
+import org.revdog.purchases.diagnostics.DiagnosticsErrorFields
 import org.revdog.purchases.diagnostics.DiagnosticsTracker
 import org.revdog.purchases.google.BillingWrapper
 import org.revdog.purchases.models.PurchaseState
@@ -299,8 +300,16 @@ internal class PostReceiptHelper(
                         // `http_status` 是 M2 留下的别名，保留以免打断既有查询。
                         "status" to error.httpStatusCode,
                         "http_status" to error.httpStatusCode,
+                        // ⚠️ `receipt_post` 的 `error_class` **保持契约 §1.3 的四值口径**
+                        // （`network|server|client|auth`）—— jobs 的不变式 18 与 admin 的
+                        // launch-sync failures 分组逐字依赖它，改一个字线上指标就断。
+                        // 0.1.2 的新口径（`DiagnosticsErrorFields.classify`）只用在原来**没有**
+                        // `error_class` 的事件上。
                         "error_class" to DiagnosticsErrorClass.from(error.httpStatusCode),
                         "request_id" to error.requestId,
+                        // 0.1.2 只增：契约 §1.4 的数值码与 SDK 自己的错误文案。
+                        DiagnosticsErrorFields.KEY_BACKEND_CODE to error.backendCode,
+                        DiagnosticsErrorFields.KEY_UNDERLYING to error.underlyingErrorMessage,
                         "duration_ms" to (dateProvider.now().time - startedAtMs),
                         "attributes_sent" to pendingAttributes.size,
                     ),

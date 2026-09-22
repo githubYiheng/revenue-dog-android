@@ -90,9 +90,18 @@ internal const val PLAY_STORE_BLOCKED_ERROR_MESSAGE_FRAGMENT: String = "Play Sto
 
 /**
  * Billing 响应码 → [PurchasesError]。结构与分组对照 RC `google/errors.kt`。
+ *
+ * @param debugMessage `BillingResult.debugMessage` 原文（0.1.2 新增，**只进诊断附注**）。
+ * 映射是多对一的 —— `purchaseNotAllowedError` 一个码位同时对应 `BILLING_UNAVAILABLE` /
+ * `ITEM_NOT_OWNED` / `FEATURE_NOT_SUPPORTED` —— 所以把原始响应码与 debugMessage
+ * 挂在错误上一路带到记录点，否则线上只能看到「不允许购买」四个字。
+ * 宿主看到的 `code` / `message` / `toString` 一字未变。
  */
 @Suppress("CyclomaticComplexMethod")
-internal fun Int.billingResponseToPurchasesError(underlyingErrorMessage: String): PurchasesError {
+internal fun Int.billingResponseToPurchasesError(
+    underlyingErrorMessage: String,
+    debugMessage: String? = null,
+): PurchasesError {
     val errorCode = when (this) {
         BillingClient.BillingResponseCode.BILLING_UNAVAILABLE,
         BillingClient.BillingResponseCode.ITEM_NOT_OWNED,
@@ -113,7 +122,7 @@ internal fun Int.billingResponseToPurchasesError(underlyingErrorMessage: String)
         BillingClient.BillingResponseCode.NETWORK_ERROR -> PurchasesErrorCode.NetworkError
         else -> PurchasesErrorCode.UnknownError
     }
-    return PurchasesError(errorCode, underlyingErrorMessage)
+    return PurchasesError(errorCode, underlyingErrorMessage).withBillingResult(this, debugMessage)
 }
 
 /**
@@ -129,12 +138,12 @@ internal fun BillingResult.toSetupError(): PurchasesError {
             PurchasesErrorCode.StoreProblemError,
             "Play 账单不可用。常见原因：设备未登录 Google 账号、没有 Play Store（模拟器）、" +
                 "或改语言后 Play 缓存损坏（打开 Play 商店或清它的缓存可修复）。$description",
-        )
+        ).withBillingResult(responseCode, debugMessage)
         debugMessage.contains(PLAY_STORE_BLOCKED_ERROR_MESSAGE_FRAGMENT, ignoreCase = true) -> PurchasesError(
             PurchasesErrorCode.StoreProblemError,
             "Play Store 被系统屏蔽（如 OEM 定制的儿童模式）。$description",
-        )
-        else -> responseCode.billingResponseToPurchasesError(description)
+        ).withBillingResult(responseCode, debugMessage)
+        else -> responseCode.billingResponseToPurchasesError(description, debugMessage)
     }
 }
 

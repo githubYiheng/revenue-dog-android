@@ -23,6 +23,7 @@ import org.revdog.purchases.common.MainDispatcher
 import org.revdog.purchases.customerinfo.CustomerInfo
 import org.revdog.purchases.customerinfo.CustomerInfoManager
 import org.revdog.purchases.customerinfo.CustomerInfoUpdateHandler
+import org.revdog.purchases.diagnostics.DiagnosticsErrorFields
 import org.revdog.purchases.diagnostics.DiagnosticsRecorder
 import org.revdog.purchases.diagnostics.DiagnosticsTracker
 import org.revdog.purchases.diagnostics.DiagnosticsWarningCode
@@ -295,9 +296,11 @@ internal class PurchasesOrchestrator(
                 mainDispatcher.dispatch { callback.onReceived(customerInfo, created) }
             },
             onError = { error ->
+                // 0.1.2：原来只有 `error_code`。`unknownBackendError` 覆盖了所有非 2xx，
+                // 没有 `status` 就分不出是边缘层、我方 API 还是别的。
                 diagnostics.track(
                     DiagnosticsTracker.EVENT_IDENTITY_LOGIN,
-                    mapOf("error_code" to error.code.name),
+                    DiagnosticsErrorFields.of(error) + mapOf("request_id" to error.requestId),
                 )
                 mainDispatcher.dispatch { callback.onError(error) }
             },
@@ -348,7 +351,7 @@ internal class PurchasesOrchestrator(
             onError = { error, _ ->
                 diagnostics.track(
                     DiagnosticsTracker.EVENT_IDENTITY_LOGOUT,
-                    mapOf("error_code" to error.code.name),
+                    DiagnosticsErrorFields.of(error) + mapOf("request_id" to error.requestId),
                 )
                 mainDispatcher.dispatch { callback.onError(error) }
             },
@@ -406,6 +409,9 @@ internal class PurchasesOrchestrator(
      * 成功路径仍然没有 `status` / `request_id`：那要把 `HTTPResult` 从 `Backend` 一路穿到
      * Manager 的成功回调上，而成功的 `status` 恒为 200、`request_id` 只在排障失败时有用
      * （失败路径已经带了两者）。这是有意不做，不是遗漏。
+     *
+     * 0.1.2：失败路径统一走 [DiagnosticsErrorFields.of]（多出 `backend_code` / `error_class` /
+     * `underlying` / Billing 两项）；成功路径的字段一个没动。
      */
     private fun trackFetch(
         event: String,
@@ -420,10 +426,8 @@ internal class PurchasesOrchestrator(
                 "policy" to policy,
                 "cache_hit" to origin?.cacheHit,
                 "duration_ms" to (dateProvider.now().time - startedAtMs),
-                "error_code" to error?.code?.name,
-                "status" to error?.httpStatusCode,
                 "request_id" to error?.requestId,
-            ),
+            ) + error?.let { DiagnosticsErrorFields.of(it) }.orEmpty(),
         )
     }
 
@@ -671,8 +675,7 @@ internal class PurchasesOrchestrator(
                         mapOf(
                             "product_id" to posted.productIds.firstOrNull(),
                             "outcome" to DiagnosticsTracker.OUTCOME_FAILED,
-                            "error_code" to error.code.name,
-                        ),
+                        ) + DiagnosticsErrorFields.of(error),
                     )
                     callback?.let { cb -> mainDispatcher.dispatch { cb.onError(error, userCancelled = false) } }
                 },
@@ -747,8 +750,7 @@ internal class PurchasesOrchestrator(
                     } else {
                         DiagnosticsTracker.OUTCOME_FAILED
                     },
-                    "error_code" to error.code.name,
-                ),
+                ) + DiagnosticsErrorFields.of(error),
             )
         } else {
             Logger.debug { "收到购买失败回调但没有在途购买，忽略：$error" }
@@ -764,10 +766,7 @@ internal class PurchasesOrchestrator(
         Logger.error { error.toString() }
         diagnostics.track(
             DiagnosticsTracker.EVENT_PURCHASE_RESULT,
-            mapOf(
-                "outcome" to DiagnosticsTracker.OUTCOME_FAILED,
-                "error_code" to error.code.name,
-            ),
+            mapOf("outcome" to DiagnosticsTracker.OUTCOME_FAILED) + DiagnosticsErrorFields.of(error),
         )
         mainDispatcher.dispatch { callback.onError(error, userCancelled = false) }
     }
@@ -915,15 +914,16 @@ internal class PurchasesOrchestrator(
             }
 
             override fun onError(error: PurchasesError) {
+                // 0.1.2：`sync` 在生产上报过 `purchaseNotAllowedError` —— 那一个码位背后是
+                // BILLING_UNAVAILABLE / ITEM_NOT_OWNED / FEATURE_NOT_SUPPORTED 三选一，
+                // 没有 `billing_response_code` 就到此为止了。
                 diagnostics.track(
                     event,
                     mapOf(
                         "outcome" to DiagnosticsTracker.OUTCOME_FAILED,
                         "duration_ms" to (dateProvider.now().time - startedAtMs),
-                        "error_code" to error.code.name,
-                        "status" to error.httpStatusCode,
                         "request_id" to error.requestId,
-                    ),
+                    ) + DiagnosticsErrorFields.of(error),
                 )
                 callback.onError(error)
             }

@@ -513,9 +513,11 @@ internal class Backend(
             try {
                 onCompletion(call())
             } catch (e: JSONException) {
-                onError(PurchasesError(PurchasesErrorCode.UnexpectedBackendResponseError, e.message))
+                onError(PurchasesError(PurchasesErrorCode.UnexpectedBackendResponseError, e.message).withCause(e))
             } catch (e: IOException) {
-                onError(PurchasesError(PurchasesErrorCode.NetworkError, e.message))
+                // 0.1.2：带上异常类名。超时与断网的 `code` 都是 `networkError`，
+                // 只有类名（`SocketTimeoutException`）能把 `error_class` 分成 timeout / network。
+                onError(PurchasesError(PurchasesErrorCode.NetworkError, e.message).withCause(e))
             } catch (e: SecurityException) {
                 // 坑 33：宿主关掉 INTERNET 权限时是 SecurityException，不是 IOException。
                 onError(

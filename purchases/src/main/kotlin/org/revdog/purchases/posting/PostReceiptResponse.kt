@@ -132,5 +132,6 @@ internal fun PurchasesError.toPurchasePostingError(handling: PostReceiptErrorHan
         backendCode = backendCode,
         httpStatusCode = httpStatusCode,
         requestId = requestId,
-    )
+        // 0.1.2：这里换了码位（网络超时 → 901），诊断附注得跟着搬，否则原因在包装那一刻就丢了。
+    ).inheritDiagnosticsAnnex(this)
 }

@@ -51,7 +51,10 @@ internal abstract class FinishPurchaseUseCase(
         val underlyingErrorMessage = "$errorMessage - ${billingResult.toHumanReadableDescription()}"
         Logger.error { underlyingErrorMessage }
         onErrorCallback.onError(
-            billingResult.responseCode.billingResponseToPurchasesError(underlyingErrorMessage),
+            billingResult.responseCode.billingResponseToPurchasesError(
+                underlyingErrorMessage,
+                billingResult.debugMessage,
+            ),
         )
     }
 }

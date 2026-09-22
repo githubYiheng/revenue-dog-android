@@ -30,6 +30,7 @@ import org.revdog.purchases.ReplacementMode
 import org.revdog.purchases.caching.DeviceCache
 import org.revdog.purchases.caching.PendingPurchase
 import org.revdog.purchases.common.sha1
+import org.revdog.purchases.diagnostics.DiagnosticsErrorFields
 import org.revdog.purchases.diagnostics.DiagnosticsTracker
 import org.revdog.purchases.google.usecase.AcknowledgePurchaseUseCase
 import org.revdog.purchases.google.usecase.AcknowledgePurchaseUseCaseParams
@@ -442,6 +443,7 @@ internal class BillingWrapper(
             if (result.isSuccessful()) return@withConnectedClientOrWarn
             val error = result.responseCode.billingResponseToPurchasesError(
                 "启动 Play 付款流程失败 - ${result.toHumanReadableDescription()}",
+                result.debugMessage,
             )
             Logger.error { error.toString() }
             purchasesUpdatedListener?.onPurchasesFailedToUpdate(
@@ -809,7 +811,11 @@ internal class BillingWrapper(
         diagnostics.track(
             DiagnosticsTracker.EVENT_BILLING_PURCHASE_UPDATE,
             mapOf(
+                // `response_code` 是**名字**（`DiagnosticsLevels.levelFor` 按它判 level，取值不能动）；
+                // 0.1.2 另加 RC 同名的整数码与 debugMessage —— 名字看不出 Play 到底说了什么。
                 "response_code" to billingResult.responseCode.getBillingResponseCodeName(),
+                DiagnosticsErrorFields.KEY_BILLING_RESPONSE_CODE to billingResult.responseCode,
+                DiagnosticsErrorFields.KEY_BILLING_DEBUG_MESSAGE to billingResult.debugMessage,
                 "count" to (purchases?.size ?: 0),
             ),
         )
@@ -834,6 +840,7 @@ internal class BillingWrapper(
         }
         val error = responseCode.billingResponseToPurchasesError(
             "购买更新失败 - ${billingResult.toHumanReadableDescription()}",
+            billingResult.debugMessage,
         )
         Logger.warn { error.toString() }
         purchasesUpdatedListener?.onPurchasesFailedToUpdate(

@@ -87,7 +87,12 @@ internal abstract class BillingClientUseCase<T>(
     private fun forwardError(billingResult: BillingResult) {
         val underlyingErrorMessage = "$errorMessage - ${billingResult.toHumanReadableDescription()}"
         Logger.error { underlyingErrorMessage }
-        onErrorCallback.onError(billingResult.responseCode.billingResponseToPurchasesError(underlyingErrorMessage))
+        onErrorCallback.onError(
+            billingResult.responseCode.billingResponseToPurchasesError(
+                underlyingErrorMessage,
+                billingResult.debugMessage,
+            ),
+        )
     }
 
     private fun backoffOrRetryNetworkError(onErrorResult: (BillingResult) -> Unit, billingResult: BillingResult) {
