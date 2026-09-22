@@ -8,8 +8,13 @@ android-targetSdk = "36"
 # （AGP 9.4.0 要求 Gradle ≥ 9.6、JDK ≥ 17，本机 JDK 21 + Gradle 9.7.1）。
 agp = "9.4.0"
 kotlin = "2.4.20"
-# 对宿主的最低 Kotlin 要求（对照 RC `kotlinLanguage = 1.8`）
+# SDK 产物的 Kotlin 语言版本（对照 RC `kotlinLanguage = 1.8`）。0.1.4 起真正生效：
+# `purchases/build.gradle.kts` 把它设成 languageVersion / apiVersion（产物 metadata 版本 = 它）。
+# 宿主的实际下限还取决于 `api` 传递依赖的 metadata：0.1.4 实测 = Kotlin 2.2（billing-ktx 9.1.0 是 2.3），
+# 见 CHANGELOG [0.1.4]。Kotlin 2.4.20 编译器对 2.0 报「deprecated，建议 2.2」—— 升编译器前先看它还支持不支持。
 kotlinLanguage = "2.0"
+# POM / Gradle module 里声明的 kotlin-stdlib（`kotlin.coreLibrariesVersion`）。必须与 kotlinLanguage 同一小版本。
+kotlinStdlib = "2.0.21"
 
 # Play Billing Library。ADR 0069 决策 3：基线 9.1.0（RC 仍在 8.3.0）。
 billingClient = "9.1.0"

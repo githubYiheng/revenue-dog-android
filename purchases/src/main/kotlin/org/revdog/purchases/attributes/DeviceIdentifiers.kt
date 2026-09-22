@@ -53,21 +53,24 @@ internal object DeviceIdentifiers {
             ?: return null
         val infoClass = info.javaClass
         val limitAdTracking = infoClass.getMethod("isLimitAdTrackingEnabled").invoke(info) as? Boolean ?: false
+        // if / else 而不是「if { return null }」：表达式体里的这种 return 要 Kotlin 2.3 语言版本，
+        // SDK 的 languageVersion 钉在版本目录的 `kotlinLanguage`（宿主兼容，见 purchases/build.gradle.kts）。
         if (limitAdTracking) {
             Logger.debug { "用户开了「限制广告跟踪」，不采集 \$gpsAdId" }
-            return null
-        }
-        val id = infoClass.getMethod("getId").invoke(info) as? String
-        when {
-            id.isNullOrEmpty() -> null
-            id == NO_PERMISSION_ADVERTISING_ID -> {
-                Logger.warn {
-                    "拿到的广告 ID 是全零值：宿主大概没在 manifest 声明 " +
-                        "com.google.android.gms.permission.AD_ID（Android 13+ 必需）。不采集 \$gpsAdId"
+            null
+        } else {
+            val id = infoClass.getMethod("getId").invoke(info) as? String
+            when {
+                id.isNullOrEmpty() -> null
+                id == NO_PERMISSION_ADVERTISING_ID -> {
+                    Logger.warn {
+                        "拿到的广告 ID 是全零值：宿主大概没在 manifest 声明 " +
+                            "com.google.android.gms.permission.AD_ID（Android 13+ 必需）。不采集 \$gpsAdId"
+                    }
+                    null
                 }
-                null
+                else -> id
             }
-            else -> id
         }
     } catch (e: ClassNotFoundException) {
         Logger.debug { "宿主未引入 play-services-ads-identifier，跳过 \$gpsAdId（${e.message}）" }

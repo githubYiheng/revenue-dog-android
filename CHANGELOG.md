@@ -8,6 +8,46 @@
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-09-22
+
+**只修构建兼容**：公开 API 基线（`purchases/api/purchases.api`）**零差异**（`scripts/api-check.sh` 证明），
+运行时行为零变化。宿主只换版本号即可。
+
+### 问题
+
+0.1.3 用 Kotlin 2.4.20 编译，产物带的是 **Kotlin metadata 2.4.0**，POM 又声明了 **kotlin-stdlib 2.4.20**。
+宿主编译器最多只能读「自身 + 1」个小版本的 metadata，AGP 9.2 内置的 Kotlin 2.2.10 读不了 2.4：
+
+```
+e: …/purchases-0.1.3-api.jar!/META-INF/purchases.kotlin_module Module was compiled with an incompatible
+   version of Kotlin. The binary version of its metadata is 2.4.0, expected version is 2.2.0.
+```
+
+版本目录里早就声明了 `kotlinLanguage = "2.0"`（对照 RC 的 `kotlinLanguage`），但**从没接到编译选项上**。
+
+### 修法
+
+- `purchases` 的 `languageVersion` / `apiVersion` 取版本目录的 `kotlinLanguage`（2.0）→ 类的 metadata 版本 2.0.0；
+  编译器本身仍是 2.4.20。
+- `kotlin.coreLibrariesVersion = 2.0.21`（版本目录 `kotlinStdlib`）→ POM / Gradle module 声明的 kotlin-stdlib
+  从 2.4.20 降到 **2.0.21**。
+- `poko-annotations` 依赖加 `kotlin-stdlib` exclusion：poko-annotations 0.23.1 自己要 stdlib **2.4.0**，
+  会把宿主的 runtime classpath 顶到 2.4；Hilt 的聚合编译（`hiltJavaCompile*`）按 runtime classpath 编译，
+  Hilt 2.59.2 自带的 kotlin-metadata-jvm 最多读 2.3，于是报
+  `Provided Metadata instance has version 2.4.0, while maximum supported version is 2.3.0`。
+  `@Poko` 是 SOURCE retention，产物字节码里对它零引用；poko 本身的版本不动。
+- 内部：`DeviceIdentifiers.advertisingId` 表达式体里的 `if { …; return null }` 改成 if / else
+  （语言版本 2.0 不允许表达式体里这样写 `return`），逻辑一字未变。
+
+### 宿主最低 Kotlin 版本（实测）
+
+- **2.2.10 通过**：AGP 9.2.0 内置 Kotlin 2.2.10 + Gradle 9.5.1 + JDK 21 + Hilt 2.59.2（KSP 2.3.9）+ minSdk 26，
+  `assembleRelease`（R8 开）全过；同一工程换回 0.1.3 复现上面的编译失败。
+- **2.1.x / 2.0.x 仍编不过，原因不在 SDK 本身**（SDK 产物已是 metadata 2.0.0），而在 `api` 传递依赖：
+  `billing-ktx` 9.1.0 的 metadata 是 **2.3.0**（2.1 宿主最多读 2.2）；2.0 宿主另外还读不了
+  `kotlinx-coroutines` 1.11.0（metadata 2.2.0）与它带来的 kotlin-stdlib 2.2.20。
+  所以 0.1.4 实际支持的宿主下限是 **Kotlin 2.2**。
+
 ## [0.1.3] - 2026-09-22
 
 公开 API 基线（`purchases/api/purchases.api`）**零差异**（`scripts/api-check.sh` 证明）。

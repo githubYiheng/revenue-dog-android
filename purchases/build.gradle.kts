@@ -1,4 +1,5 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.dsl.KotlinVersion
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 plugins {
@@ -101,9 +102,31 @@ afterEvaluate {
     }
 }
 
+// 宿主兼容（0.1.4，对照 RC `purchases/build.gradle.kts` 的 `kotlinLanguage`）：
+// 编译器用版本目录的 `kotlin`（2.4.x），但产物按 `kotlinLanguage` 出 —— 类的 Kotlin metadata
+// 版本 = languageVersion，宿主编译器最多只能读「自身 + 1」个小版本的 metadata
+// （0.1.3 出的是 2.4，AGP 9.2 内置的 Kotlin 2.2.10 读不了，宿主直接编译失败）。
+// apiVersion 同值：源码里用不到比它新的 stdlib API。coreLibrariesVersion 决定 POM /
+// Gradle module 里声明的 kotlin-stdlib 版本（不设就是编译器版本 2.4.20，把宿主的 stdlib 顶到 2.4）。
 kotlin {
     compilerOptions {
         jvmTarget.set(JvmTarget.JVM_17)
+        languageVersion.set(KotlinVersion.fromVersion(libs.versions.kotlinLanguage.get()))
+        apiVersion.set(KotlinVersion.fromVersion(libs.versions.kotlinLanguage.get()))
+    }
+    coreLibrariesVersion = libs.versions.kotlinStdlib.get()
+}
+
+// 同一件事的另一半：poko 插件把 `poko-annotations` 自动加成 `implementation`（发布成 runtime 依赖，
+// RC 也是这样发的），而 poko-annotations 0.23.1 的 POM 要 kotlin-stdlib **2.4.0** —— 宿主的
+// runtime classpath 于是被顶到 stdlib 2.4。Hilt 的聚合编译（`hiltJavaCompile*`）按 runtime classpath
+// 编译、用自带的 kotlin-metadata-jvm（Hilt 2.59.2 = 2.2.20，最多读 2.3）读 `kotlin.Metadata`，直接失败。
+// `@Poko` 是 SOURCE retention，产物字节码里零引用；这里只切掉它传递的 stdlib，不动它本身的版本。
+configurations.configureEach {
+    dependencies.withType<ExternalModuleDependency>().configureEach {
+        if (group == "dev.drewhamilton.poko" && name == "poko-annotations") {
+            exclude(group = "org.jetbrains.kotlin", module = "kotlin-stdlib")
+        }
     }
 }
 
