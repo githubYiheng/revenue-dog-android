@@ -617,6 +617,7 @@ package org.revdog.purchases.customerinfo {
   @dev.drewhamilton.poko.Poko public final class SubscriptionInfo {
     method @InaccessibleFromKotlin public java.util.Date? getAutoResumeDate();
     method @InaccessibleFromKotlin public java.util.Date? getBillingIssuesDetectedAt();
+    method @InaccessibleFromKotlin public String? getDisplayName();
     method @InaccessibleFromKotlin public java.util.Date? getExpiresDate();
     method @InaccessibleFromKotlin public java.util.Date? getGracePeriodExpiresDate();
     method @InaccessibleFromKotlin public android.net.Uri? getManagementURL();
@@ -630,11 +631,15 @@ package org.revdog.purchases.customerinfo {
     method @InaccessibleFromKotlin public org.revdog.purchases.Store getStore();
     method @InaccessibleFromKotlin public String? getStoreTransactionId();
     method @InaccessibleFromKotlin public java.util.Date? getUnsubscribeDetectedAt();
+    method @InaccessibleFromKotlin public boolean getWillRenew();
+    method @InaccessibleFromKotlin public boolean isActive();
     method @InaccessibleFromKotlin public boolean isSandbox();
     property public java.util.Date? autoResumeDate;
     property public java.util.Date? billingIssuesDetectedAt;
+    property public String? displayName;
     property public java.util.Date? expiresDate;
     property public java.util.Date? gracePeriodExpiresDate;
+    property public boolean isActive;
     property public boolean isSandbox;
     property public android.net.Uri? managementURL;
     property public java.util.Date? originalPurchaseDate;
@@ -647,6 +652,7 @@ package org.revdog.purchases.customerinfo {
     property public org.revdog.purchases.Store store;
     property public String? storeTransactionId;
     property public java.util.Date? unsubscribeDetectedAt;
+    property public boolean willRenew;
   }
 
 }

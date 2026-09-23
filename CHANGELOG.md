@@ -8,6 +8,54 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-23
+
+Flutter 插件需要的 M0 挂点（ADR 0097 步骤 ②，`docs/plan/flutter-sdk-design.md` §9 / 主代理裁定 1、7、10），
+外加依赖从 `billing-ktx` 换成纯 `billing`（ADR 0099 决定 2）。公开面只增、依赖语义有变，所以升**次**版本号。
+
+### 公开 API 基线差异
+
+`purchases/api/purchases.api` **只增**：`SubscriptionInfo` 的三个属性 `isActive` / `willRenew` / `displayName`
+（`scripts/api-check.sh` 的 diff 只有这三个 getter + property 行）。下面标「内部」的全部是 `@InternalRevenueDogAPI`，
+metalava 隐藏、**不进公开面**，随时可能改，宿主不要用（Kotlin 调用要显式 opt-in，编译期即报错）。
+
+### 新增
+
+- **`SubscriptionInfo.isActive` / `willRenew` / `displayName`**（公开，对照 RC `SubscriptionInfo` 同名字段）。
+  `isActive` / `willRenew` 与 `EntitlementInfo` **同一实现**（`isActive` 抽成 `EntitlementInfoHelper.isActive`，
+  两处共用：`requestDate` 3 天 grace + 计费宽限期；`expiresDate == null` 按终身算有效；`willRenew` 五项否定），
+  同一份响应里权益与它关联的订阅必然同判定。`displayName` 取契约 `subscriptions[<pid>].display_name`，没给为 `null`。
+  构造器仍是 `internal`，参数加在末尾，不破 ABI。
+- 内部：**`PurchasesConfiguration.Builder.platformInfo(flavor, version)`**（R1，对照 RC `PlatformInfo`）。
+  值原样进 `X-Platform-Flavor` / `X-Platform-Flavor-Version`；不调 = `native` / 不发版本头（原生宿主行为不变）。
+  两个字段纳入「同配置重复 configure」判定。
+- 内部：**`Purchases.addCustomerInfoObserver(UpdatedCustomerInfoListener): java.io.Closeable`**（裁定 1）。
+  可多订阅、Java 可直接用 lambda：挂 `customerInfoFlow`（replay = 1 + distinct），订阅即回放最近值，之后每次变化一次，
+  回调在主线程（与 `updatedCustomerInfoListener` 同一 `MainDispatcher` 出口，主 Handler 取不到时的兜底同坑 38）；
+  `close()` 幂等，已经 post 出去还没跑的那一次也会被挡住；实例 close（重新 configure）时全部失效。
+  `updatedCustomerInfoListener` 行为不变。
+- 内部：**`RevenueDogTestModels`**（裁定 7）。`customerInfoFromJson` / `offeringsFromJson` 复用 SDK 自己的解析器
+  （与真实路径同一套代码）；`storeProduct` / `subscriptionOption` / `pricingPhase` / `storeTransaction` 按字段构造，
+  `defaultOption` 等派生属性仍由既有规则推导。全部 `@JvmStatic`。
+- 内部：**`Purchases.recordDiagnosticsEvent(name, properties)` / `recordDiagnosticsWarning(code, detail)`**（裁定 10）。
+  事件名必须匹配 `^[a-z_]{1,64}$`（`sdk-diagnostics.md` §1.3 硬限），不合规打 warn 丢弃、**不抛**；字段原样交给既有管线
+  （截断、level 推导照旧；未知事件名走 `DiagnosticsLevels.levelFor` 的兜底：带 `error_code` → error，否则 info）；warning 记成 `sdk_warning{code, detail}`；诊断关闭时 no-op。
+
+### 依赖变更：`billing-ktx` → `billing`（宿主 Kotlin 下限 2.2 → **2.1**）
+
+- `com.android.billingclient:billing-ktx:9.1.0` 换成 **`com.android.billingclient:billing:9.1.0`**，仍是 `api` 依赖，
+  版本不变（ADR 0099 决定 2；RC 10.22.1 同样依赖纯 billing）。SDK 源码全部是回调形态，**没有用过任何 ktx 扩展**，代码零改动。
+- 为什么：`billing-ktx` 9.1.0 带 Kotlin metadata 2.3.0，经 `api` 进宿主 compile classpath，宿主编译器最多读「自身 + 1」，
+  所以 0.1.4 的实际下限是 Kotlin 2.2（见 [0.1.4]）。纯 `billing` 没有 Kotlin metadata，下限改由 `kotlinx-coroutines` 1.11
+  （metadata 2.2）决定 → **Kotlin 2.1 可用**；2.0 仍编不过（coroutines 1.11 与它带的 stdlib 2.2.20）。
+  依据是 `docs/research/verify/2026-09-23-flutter-plugin-kotlin-floor.md` 的 exclude 模拟实测（Kotlin 2.1 宿主全 PASS）。
+- 宿主若自己用了 ktx 的挂起扩展（`queryProductDetails` suspend 版等），需要自行加 `billing-ktx` 依赖（版本与本 SDK 的 billing 对齐；加了之后宿主 Kotlin 下限回到 2.2）。
+
+### 其它
+
+- 出站请求快照的 `X-Version` 随版本号更新为 `0.2.0`（`src/test/resources/snapshots/*.json`），其余头零变化。
+- `api-tester` 补上 `SubscriptionInfo` 三个新属性的 Java / Kotlin 调用。
+
 ## [0.1.4] - 2026-09-22
 
 **只修构建兼容**：公开 API 基线（`purchases/api/purchases.api`）**零差异**（`scripts/api-check.sh` 证明），

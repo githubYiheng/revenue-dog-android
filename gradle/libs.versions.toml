@@ -10,13 +10,16 @@ agp = "9.4.0"
 kotlin = "2.4.20"
 # SDK 产物的 Kotlin 语言版本（对照 RC `kotlinLanguage = 1.8`）。0.1.4 起真正生效：
 # `purchases/build.gradle.kts` 把它设成 languageVersion / apiVersion（产物 metadata 版本 = 它）。
-# 宿主的实际下限还取决于 `api` 传递依赖的 metadata：0.1.4 实测 = Kotlin 2.2（billing-ktx 9.1.0 是 2.3），
-# 见 CHANGELOG [0.1.4]。Kotlin 2.4.20 编译器对 2.0 报「deprecated，建议 2.2」—— 升编译器前先看它还支持不支持。
+# 宿主的实际下限还取决于 `api` 传递依赖的 metadata：0.1.4 实测 = Kotlin 2.2（billing-ktx 9.1.0 是 2.3）；
+# 0.2.0 换纯 billing 后 = Kotlin 2.1（由 kotlinx-coroutines 1.11 的 metadata 2.2 决定），见 CHANGELOG [0.2.0]。
+# Kotlin 2.4.20 编译器对 2.0 报「deprecated，建议 2.2」—— 升编译器前先看它还支持不支持。
 kotlinLanguage = "2.0"
 # POM / Gradle module 里声明的 kotlin-stdlib（`kotlin.coreLibrariesVersion`）。必须与 kotlinLanguage 同一小版本。
 kotlinStdlib = "2.0.21"
 
 # Play Billing Library。ADR 0069 决策 3：基线 9.1.0（RC 仍在 8.3.0）。
+# 0.2.0 起坐标是纯 `billing`，不是 `billing-ktx`（ADR 0099 决定 2，对照 RC 10.22.1 `libs.versions.toml:117`）：
+# ktx 9.1.0 带 Kotlin metadata 2.3.0，经 `api` 传给宿主，把宿主 Kotlin 下限抬到 2.2；SDK 源码从未用过 ktx 扩展。
 billingClient = "9.1.0"
 
 androidxAnnotation = "1.10.0"
@@ -43,7 +46,7 @@ androidxTestCore = "1.7.0"
 androidxTestJunit = "1.3.0"
 
 [libraries]
-billing = { module = "com.android.billingclient:billing-ktx", version.ref = "billingClient" }
+billing = { module = "com.android.billingclient:billing", version.ref = "billingClient" }
 androidx-annotation = { module = "androidx.annotation:annotation", version.ref = "androidxAnnotation" }
 androidx-core = { module = "androidx.core:core-ktx", version.ref = "androidxCore" }
 androidx-lifecycle-process = { module = "androidx.lifecycle:lifecycle-process", version.ref = "lifecycle" }

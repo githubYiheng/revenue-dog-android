@@ -1,6 +1,7 @@
 package org.revdog.purchases
 
 import android.content.Context
+import org.revdog.purchases.common.Config
 import org.revdog.purchases.common.Dispatcher
 import org.revdog.purchases.google.BillingWrapper
 import org.revdog.purchases.networking.HTTPClient
@@ -45,6 +46,15 @@ public class PurchasesConfiguration internal constructor(builder: Builder) {
     /** 自动展示 Play in-app message。默认**开**（与 RC 一致）。 */
     public val showInAppMessagesAutomatically: Boolean = builder.showInAppMessagesAutomatically
 
+    /**
+     * 混合框架标记（`X-Platform-Flavor`）。原生宿主恒为 `native`；
+     * 由 [Builder.platformInfo] 覆写（对照 RC `PlatformInfo.flavor`）。
+     */
+    internal val platformFlavor: String = builder.platformFlavor
+
+    /** 混合框架自身的版本（`X-Platform-Flavor-Version`）。原生宿主为 `null`（不发这个头）。 */
+    internal val platformFlavorVersion: String? = builder.platformFlavorVersion
+
     /** **仅测试用**：替换整个 HTTP 层。生产路径永远为 `null`。 */
     internal val httpClientOverride: HTTPClient? = builder.httpClientOverride
 
@@ -80,6 +90,8 @@ public class PurchasesConfiguration internal constructor(builder: Builder) {
             baseURL == other.baseURL &&
             pendingTransactionsForPrepaidPlansEnabled == other.pendingTransactionsForPrepaidPlansEnabled &&
             showInAppMessagesAutomatically == other.showInAppMessagesAutomatically &&
+            platformFlavor == other.platformFlavor &&
+            platformFlavorVersion == other.platformFlavorVersion &&
             httpClientOverride === other.httpClientOverride &&
             dispatcherOverride === other.dispatcherOverride &&
             billingOverride === other.billingOverride
@@ -105,6 +117,10 @@ public class PurchasesConfiguration internal constructor(builder: Builder) {
         internal var pendingTransactionsForPrepaidPlansEnabled: Boolean = false
             private set
         internal var showInAppMessagesAutomatically: Boolean = true
+            private set
+        internal var platformFlavor: String = Config.PLATFORM_FLAVOR_NATIVE
+            private set
+        internal var platformFlavorVersion: String? = null
             private set
         internal var httpClientOverride: HTTPClient? = null
             private set
@@ -145,6 +161,24 @@ public class PurchasesConfiguration internal constructor(builder: Builder) {
          */
         public fun showInAppMessagesAutomatically(enabled: Boolean): Builder =
             apply { this.showInAppMessagesAutomatically = enabled }
+
+        /**
+         * **混合框架专用**（Flutter / RN 插件，R1），原生宿主不要调。
+         *
+         * 对照 RC：值的形状同 RC `PlatformInfo(flavor, version)`；RC 由混合层在 configure 前写进程级的
+         * `Purchases.platformInfo`，我方放进配置 Builder（偏离：跟着实例走，并纳入同配置重复 configure 的判定）。
+         *
+         * 值原样进 `X-Platform-Flavor` / `X-Platform-Flavor-Version` 两个请求头，
+         * 服务端按它给混合框架宿主分组排障。不调 = `native` / 不发版本头。
+         *
+         * @param flavor 框架名，例如 `"flutter"`。
+         * @param version 插件自身版本（例如 pubspec 版本）；`null` = 不发版本头。
+         */
+        @InternalRevenueDogAPI
+        public fun platformInfo(flavor: String, version: String?): Builder = apply {
+            this.platformFlavor = flavor
+            this.platformFlavorVersion = version
+        }
 
         /** **仅测试用**（internal）：注入假后端。 */
         internal fun httpClientOverride(client: HTTPClient?): Builder = apply { this.httpClientOverride = client }

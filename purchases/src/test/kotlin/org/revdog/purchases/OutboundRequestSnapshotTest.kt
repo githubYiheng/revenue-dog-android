@@ -125,6 +125,56 @@ class OutboundRequestSnapshotTest {
         assertThat(observerClient.recordedRequests.single().headers["X-Observer-Mode-Enabled"]).isEqualTo("true")
     }
 
+    /**
+     * R1 PlatformInfo（0.2.0）：配置 → `PurchasesFactory.appConfig`（生产映射）→ 生产 `HTTPClient` 拼头。
+     * 混合框架插件 configure 时带 `platformInfo("flutter", 版本)`，服务端按它分组排障。
+     */
+    @OptIn(InternalRevenueDogAPI::class)
+    @Test
+    fun `配置了 platformInfo 时发 X-Platform-Flavor 与 X-Platform-Flavor-Version`() {
+        val configuration = PurchasesConfiguration.Builder(context, FakeHTTPClient.TEST_API_KEY)
+            .baseURL(FakeHTTPClient.TEST_BASE_URL)
+            .platformInfo("flutter", "0.1.0")
+            .build()
+        val client = FakeHTTPClient(PurchasesFactory.appConfig(configuration), ETagManager(context))
+        Backend(client, DirectDispatcher())
+            .getCustomerInfo(anonymousID, appInBackground = false, onSuccess = {}, onError = { _, _ -> })
+
+        val headers = client.recordedRequests.single().headers
+        assertThat(headers["X-Platform-Flavor"]).isEqualTo("flutter")
+        assertThat(headers["X-Platform-Flavor-Version"]).isEqualTo("0.1.0")
+    }
+
+    @Test
+    fun `没配 platformInfo 时 flavor 为 native 且不发版本头`() {
+        val configuration = PurchasesConfiguration.Builder(context, FakeHTTPClient.TEST_API_KEY)
+            .baseURL(FakeHTTPClient.TEST_BASE_URL)
+            .build()
+        val client = FakeHTTPClient(PurchasesFactory.appConfig(configuration), ETagManager(context))
+        Backend(client, DirectDispatcher())
+            .getCustomerInfo(anonymousID, appInBackground = false, onSuccess = {}, onError = { _, _ -> })
+
+        val headers = client.recordedRequests.single().headers
+        assertThat(headers["X-Platform-Flavor"]).isEqualTo(Config.PLATFORM_FLAVOR_NATIVE)
+        assertThat(headers).doesNotContainKey("X-Platform-Flavor-Version")
+    }
+
+    @OptIn(InternalRevenueDogAPI::class)
+    @Test
+    fun `platformInfo 不同的两份配置不算同一份（重复 configure 判定）`() {
+        val native = PurchasesConfiguration.Builder(context, FakeHTTPClient.TEST_API_KEY).build()
+        val flutter = PurchasesConfiguration.Builder(context, FakeHTTPClient.TEST_API_KEY)
+            .platformInfo("flutter", "0.1.0").build()
+        val flutterNext = PurchasesConfiguration.Builder(context, FakeHTTPClient.TEST_API_KEY)
+            .platformInfo("flutter", "0.1.1").build()
+        val flutterSame = PurchasesConfiguration.Builder(context, FakeHTTPClient.TEST_API_KEY)
+            .platformInfo("flutter", "0.1.0").build()
+
+        assertThat(native.sameAs(flutter)).isFalse()
+        assertThat(flutter.sameAs(flutterNext)).isFalse()
+        assertThat(flutter.sameAs(flutterSame)).isTrue()
+    }
+
     @Test
     fun `ETag 头只在走协商缓存的端点上出现`() {
         httpClient.enqueue(201, Fixtures.SUBSCRIBER_RESPONSE)

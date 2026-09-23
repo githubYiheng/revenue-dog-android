@@ -94,3 +94,31 @@ internal object NoOpDiagnosticsTracker : DiagnosticsTracker {
         Logger.log(LogLevel.VERBOSE) { "diagnostics[$name] $properties" }
     }
 }
+
+/**
+ * 外部（混合框架插件）记的事件名必须满足契约硬限 `type` ≤ 64 字符 `[a-z_]`
+ * （`docs/plan/sdk-diagnostics.md` §1.3，[DiagnosticsEvent.MAX_TYPE_LENGTH]）。
+ */
+private val EXTERNAL_EVENT_NAME_REGEX = Regex("^[a-z_]{1,${DiagnosticsEvent.MAX_TYPE_LENGTH}}$")
+
+/**
+ * 混合框架插件记诊断的唯一入口（`Purchases.recordDiagnosticsEvent`，主代理裁定 10；
+ * 对照 iOS `@_spi` 的 `recordEvent`）。
+ *
+ * - 事件名不合契约 → `Logger.warn` 并**丢弃**，不抛：插件的一条坏打点不该变成宿主的崩溃；
+ * - 合规 → 原样交给 [DiagnosticsTracker.track]：字段截断、`null` 剔除、level 推导
+ *   （[DiagnosticsLevels.levelFor]，未知事件名按既有兜底规则）全在既有管线里，这里不重复；
+ * - 诊断关闭时 tracker 本身就是 no-op（`DiagnosticsRecorder.track` 的 `enabled` 守卫）。
+ */
+internal fun DiagnosticsTracker.recordExternalEvent(name: String, properties: Map<String, Any?>) {
+    if (!EXTERNAL_EVENT_NAME_REGEX.matches(name)) {
+        Logger.warn { "诊断事件名不合契约（要求 ^[a-z_]{1,64}$），已丢弃：$name" }
+        return
+    }
+    track(name, properties)
+}
+
+/** 混合框架插件记 `sdk_warning{code, detail}`（`Purchases.recordDiagnosticsWarning`）。 */
+internal fun DiagnosticsTracker.recordExternalWarning(code: String, detail: String?) {
+    warn(code, detail)
+}

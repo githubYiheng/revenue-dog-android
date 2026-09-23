@@ -195,6 +195,9 @@ final class PurchasesAPI {
         String storeTransactionId = info.getStoreTransactionId();
         String productPlanIdentifier = info.getProductPlanIdentifier();
         Uri managementURL = info.getManagementURL();
+        boolean isActive = info.isActive();
+        boolean willRenew = info.getWillRenew();
+        String displayName = info.getDisplayName();
     }
 
     static void checkNonSubscription(NonSubscriptionTransaction transaction) {

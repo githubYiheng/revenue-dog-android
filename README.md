@@ -3,7 +3,7 @@
 Revenue Dog 的 Android 客户端 SDK：自建 RevenueCat 式内购后端的 Google Play Billing SDK，
 接口命名与 RevenueCat 兼容以便迁移。MIT 许可。
 
-- **minSdk 24**（Android 7.0）· compileSdk 36 · JVM 17 · **宿主 Kotlin ≥ 2.2**（SDK 用 2.4 编译、按语言版本 2.0 出产物；下限由 billing-ktx 9.1.0 决定，见 CHANGELOG 0.1.4）
+- **minSdk 24**（Android 7.0）· compileSdk 36 · JVM 17 · **宿主 Kotlin ≥ 2.1**（SDK 用 2.4 编译、按语言版本 2.0 出产物；0.2.0 起依赖纯 billing（不再是 billing-ktx），下限由 kotlinx-coroutines 1.11 的 metadata 2.2 决定，见 CHANGELOG 0.2.0）
 - **Play Billing Library 9.1.0**（PBL 8 的强制期限已到；9 改了错误码语义，我方直接以 9 为基线）
 - 公开 API 与 iOS SDK 同名同形，三套形态：callback / Kotlin lambda（`…With`）/ suspend + Flow
 
@@ -28,7 +28,7 @@ dependencyResolutionManagement {
 
 // build.gradle.kts
 dependencies {
-    implementation("org.revdog:purchases:0.1.4")
+    implementation("org.revdog:purchases:0.2.0")
 }
 ```
 

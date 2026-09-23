@@ -201,6 +201,9 @@ internal object KotlinPurchasesAPI {
         val expiresDate: java.util.Date? = info.expiresDate
         val unsubscribeDetectedAt: java.util.Date? = info.unsubscribeDetectedAt
         val billingIssuesDetectedAt: java.util.Date? = info.billingIssuesDetectedAt
+        val isActive: Boolean = info.isActive
+        val willRenew: Boolean = info.willRenew
+        val displayName: String? = info.displayName
     }
 
     fun checkNonSubscription(transaction: NonSubscriptionTransaction) {

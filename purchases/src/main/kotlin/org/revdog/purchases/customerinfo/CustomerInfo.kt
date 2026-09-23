@@ -79,6 +79,20 @@ public class SubscriptionInfo internal constructor(
     /** Google base plan id。 */
     public val productPlanIdentifier: String?,
     public val managementURL: Uri?,
+    /**
+     * 这条订阅当前是否有效（0.2.0 新增，对照 RC `SubscriptionInfo.isActive`）。
+     * 口径与 [EntitlementInfo.isActive] **同一实现**：`requestDate` 3 天 grace
+     * （`DateHelper.isDateActive`，`expiresDate == null` 按终身算有效）或仍在计费宽限期内
+     * （`gracePeriodExpiresDate` 晚于 `requestDate`）。
+     */
+    public val isActive: Boolean,
+    /**
+     * 是否会自动续订（0.2.0 新增，对照 RC `SubscriptionInfo.willRenew`）。
+     * 口径与 [EntitlementInfo.willRenew] 同一实现（`EntitlementInfoHelper.getWillRenew` 五项否定）。
+     */
+    public val willRenew: Boolean,
+    /** 商品展示名（0.2.0 新增，契约 `subscriptions[<pid>].display_name`；后端没给为 `null`）。 */
+    public val displayName: String?,
 )
 
 /**

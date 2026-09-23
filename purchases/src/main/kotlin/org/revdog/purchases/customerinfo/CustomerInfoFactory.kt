@@ -53,6 +53,7 @@ internal object CustomerInfoFactory {
     private const val KEY_AUTO_RESUME_DATE = "auto_resume_date"
     private const val KEY_STORE_TRANSACTION_ID = "store_transaction_id"
     private const val KEY_ID = "id"
+    private const val KEY_DISPLAY_NAME = "display_name"
 
     /** Google 商品的复合 key 分隔符：`productId:basePlanId`。 */
     const val SUBS_ID_BASE_PLAN_ID_SEPARATOR: String = ":"
@@ -81,7 +82,7 @@ internal object CustomerInfoFactory {
         val entitlementsJson = subscriber.optJSONObject(KEY_ENTITLEMENTS) ?: JSONObject()
 
         val subscriptions = subscriptionsJson.keysSequence().associateWith { productId ->
-            subscriptionsJson.getJSONObject(productId).toSubscriptionInfo(productId)
+            subscriptionsJson.getJSONObject(productId).toSubscriptionInfo(productId, requestDate, now)
         }
         val nonSubscriptions = nonSubscriptionsJson.keysSequence().associateWith { productId ->
             nonSubscriptionsJson.getJSONArray(productId).objects().map { it.toNonSubscription(productId) }
@@ -137,24 +138,50 @@ internal object CustomerInfoFactory {
             key to productJson.optDate(jsonKey)
         }
 
-    private fun JSONObject.toSubscriptionInfo(productId: String): SubscriptionInfo = SubscriptionInfo(
-        productIdentifier = productId,
-        purchaseDate = optDate(KEY_PURCHASE_DATE),
-        originalPurchaseDate = optDate(KEY_ORIGINAL_PURCHASE_DATE),
-        expiresDate = optDate(KEY_EXPIRES_DATE),
-        store = Store.fromString(optNullableString(KEY_STORE)),
-        isSandbox = optBoolean(KEY_IS_SANDBOX, false),
-        periodType = PeriodType.fromString(optNullableString(KEY_PERIOD_TYPE)),
-        ownershipType = OwnershipType.fromString(optNullableString(KEY_OWNERSHIP_TYPE)),
-        unsubscribeDetectedAt = optDate(KEY_UNSUBSCRIBE_DETECTED_AT),
-        billingIssuesDetectedAt = optDate(KEY_BILLING_ISSUES_DETECTED_AT),
-        gracePeriodExpiresDate = optDate(KEY_GRACE_PERIOD_EXPIRES_DATE),
-        refundedAt = optDate(KEY_REFUNDED_AT),
-        autoResumeDate = optDate(KEY_AUTO_RESUME_DATE),
-        storeTransactionId = optNullableString(KEY_STORE_TRANSACTION_ID),
-        productPlanIdentifier = optNullableString(KEY_PRODUCT_PLAN_IDENTIFIER),
-        managementURL = optNullableString(KEY_MANAGEMENT_URL)?.let { Uri.parse(it) },
-    )
+    /**
+     * `isActive` / `willRenew` 与 [buildEntitlementInfo] 走**同一组 helper**（`DateHelper.isDateActive` +
+     * `EntitlementInfoHelper.isActive` / `getWillRenew`），`requestDate` / `now` 同样由调用方传入 ——
+     * 同一份响应里 entitlement 与它关联的 subscription 必然同判定。
+     */
+    private fun JSONObject.toSubscriptionInfo(productId: String, requestDate: Date, now: Date): SubscriptionInfo {
+        val expiresDate = optDate(KEY_EXPIRES_DATE)
+        val store = Store.fromString(optNullableString(KEY_STORE))
+        val periodType = PeriodType.fromString(optNullableString(KEY_PERIOD_TYPE))
+        val unsubscribeDetectedAt = optDate(KEY_UNSUBSCRIBE_DETECTED_AT)
+        val billingIssuesDetectedAt = optDate(KEY_BILLING_ISSUES_DETECTED_AT)
+        val gracePeriodExpiresDate = optDate(KEY_GRACE_PERIOD_EXPIRES_DATE)
+        return SubscriptionInfo(
+            productIdentifier = productId,
+            purchaseDate = optDate(KEY_PURCHASE_DATE),
+            originalPurchaseDate = optDate(KEY_ORIGINAL_PURCHASE_DATE),
+            expiresDate = expiresDate,
+            store = store,
+            isSandbox = optBoolean(KEY_IS_SANDBOX, false),
+            periodType = periodType,
+            ownershipType = OwnershipType.fromString(optNullableString(KEY_OWNERSHIP_TYPE)),
+            unsubscribeDetectedAt = unsubscribeDetectedAt,
+            billingIssuesDetectedAt = billingIssuesDetectedAt,
+            gracePeriodExpiresDate = gracePeriodExpiresDate,
+            refundedAt = optDate(KEY_REFUNDED_AT),
+            autoResumeDate = optDate(KEY_AUTO_RESUME_DATE),
+            storeTransactionId = optNullableString(KEY_STORE_TRANSACTION_ID),
+            productPlanIdentifier = optNullableString(KEY_PRODUCT_PLAN_IDENTIFIER),
+            managementURL = optNullableString(KEY_MANAGEMENT_URL)?.let { Uri.parse(it) },
+            isActive = EntitlementInfoHelper.isActive(
+                DateHelper.isDateActive(expiresDate, requestDate, now),
+                gracePeriodExpiresDate,
+                requestDate,
+            ),
+            willRenew = EntitlementInfoHelper.getWillRenew(
+                store,
+                expiresDate,
+                unsubscribeDetectedAt,
+                billingIssuesDetectedAt,
+                periodType,
+            ),
+            displayName = optNullableString(KEY_DISPLAY_NAME),
+        )
+    }
 
     private fun JSONObject.toNonSubscription(productId: String): NonSubscriptionTransaction =
         NonSubscriptionTransaction(
@@ -228,10 +255,8 @@ internal object CustomerInfoFactory {
                 "权益 $identifier 已过期且超出 3 天 grace（expires=$expirationDate, requestDate=$requestDate）"
             }
         }
-        // 宽限期（后端下发的 grace_period_expires_date）本身就是「还有效」的信号，
-        // 与本地时钟 grace 是两件事：前者是计费宽限，后者是抗改表。与 iOS `isActive` 同口径。
-        val isActive = dateActive.isActive ||
-            (gracePeriodExpiresDate != null && gracePeriodExpiresDate.after(requestDate))
+        // 口径见 `EntitlementInfoHelper.isActive`（与 `SubscriptionInfo.isActive` 共用）。
+        val isActive = EntitlementInfoHelper.isActive(dateActive, gracePeriodExpiresDate, requestDate)
 
         return EntitlementInfo(
             identifier = identifier,

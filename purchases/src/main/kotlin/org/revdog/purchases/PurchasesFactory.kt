@@ -12,6 +12,7 @@ import org.revdog.purchases.caching.PendingPurchaseStore
 import org.revdog.purchases.common.AppConfig
 import org.revdog.purchases.common.Dispatcher
 import org.revdog.purchases.common.MainDispatcher
+import org.revdog.purchases.common.PlatformInfo
 import org.revdog.purchases.customerinfo.CustomerInfoManager
 import org.revdog.purchases.customerinfo.CustomerInfoUpdateHandler
 import org.revdog.purchases.diagnostics.DiagnosticsQueue
@@ -53,15 +54,7 @@ internal object PurchasesFactory {
         val mainHandler: Handler? = runCatching { Handler(Looper.getMainLooper()) }.getOrNull()
         val mainDispatcher = MainDispatcher(mainHandler)
 
-        val appConfig = AppConfig(
-            context = context,
-            apiKey = configuration.apiKey,
-            baseURL = configuration.baseURL,
-            purchasesAreCompletedBy = configuration.purchasesCompletedBy,
-            isDebugBuild = context.isDebugBuild(),
-            diagnosticsEnabled = configuration.diagnosticsEnabled,
-            showInAppMessagesAutomatically = configuration.showInAppMessagesAutomatically,
-        )
+        val appConfig = appConfig(configuration)
 
         val httpClient = configuration.httpClientOverride
             ?: HTTPClient(appConfig, ETagManager(context))
@@ -190,6 +183,25 @@ internal object PurchasesFactory {
             diagnosticsRecorder = diagnosticsRecorder,
         )
     }
+
+    /**
+     * 配置 → [AppConfig]。单独拆出来是为了让「配置里的值原样进了请求头」能被单测直接锁住
+     * （`OutboundRequestSnapshotTest`：同一个函数的输出喂给假后端，头仍由生产 `HTTPClient` 拼）。
+     */
+    @VisibleForTesting
+    fun appConfig(configuration: PurchasesConfiguration): AppConfig = AppConfig(
+        context = configuration.context,
+        apiKey = configuration.apiKey,
+        baseURL = configuration.baseURL,
+        purchasesAreCompletedBy = configuration.purchasesCompletedBy,
+        platformInfo = PlatformInfo(
+            flavor = configuration.platformFlavor,
+            version = configuration.platformFlavorVersion,
+        ),
+        isDebugBuild = configuration.context.isDebugBuild(),
+        diagnosticsEnabled = configuration.diagnosticsEnabled,
+        showInAppMessagesAutomatically = configuration.showInAppMessagesAutomatically,
+    )
 
     private fun android.content.Context.isDebugBuild(): Boolean =
         (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0

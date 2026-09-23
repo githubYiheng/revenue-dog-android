@@ -248,6 +248,129 @@ class CustomerInfoFactoryTest {
 
     // endregion
 
+    // region SubscriptionInfo.isActive / willRenew / displayName（0.2.0，与 EntitlementInfo 同一实现）
+
+    /**
+     * 一个权益 `pro` 关联一条订阅 `sub_a`；request_date = now = 2026-09-18。
+     * 日期参数传 `null` = JSON 里写 `null`（契约可空）。
+     */
+    private fun subscriptionResponse(
+        expires: String?,
+        grace: String? = null,
+        unsubscribe: String? = null,
+        displayName: String? = null,
+    ): String {
+        val subscription = JSONObject()
+            .put("purchase_date", "2026-09-01T00:00:00Z")
+            .put("original_purchase_date", "2026-09-01T00:00:00Z")
+            .put("expires_date", expires ?: JSONObject.NULL)
+            .put("grace_period_expires_date", grace ?: JSONObject.NULL)
+            .put("unsubscribe_detected_at", unsubscribe ?: JSONObject.NULL)
+            .put("billing_issues_detected_at", JSONObject.NULL)
+            .put("store", "play_store")
+            .put("period_type", "normal")
+            .put("ownership_type", "PURCHASED")
+            .put("is_sandbox", false)
+        if (displayName != null) subscription.put("display_name", displayName)
+        val entitlement = JSONObject()
+            .put("expires_date", expires ?: JSONObject.NULL)
+            .put("grace_period_expires_date", grace ?: JSONObject.NULL)
+            .put("product_identifier", "sub_a")
+            .put("purchase_date", "2026-09-01T00:00:00Z")
+        return JSONObject()
+            .put("request_date", "2026-09-18T00:00:00Z")
+            .put(
+                "subscriber",
+                JSONObject()
+                    .put("original_app_user_id", "u")
+                    .put("first_seen", "2026-01-01T00:00:00Z")
+                    .put("entitlements", JSONObject().put("pro", entitlement))
+                    .put("subscriptions", JSONObject().put("sub_a", subscription))
+                    .put("non_subscriptions", JSONObject()),
+            )
+            .toString()
+    }
+
+    /** 解析并断言：同一 fixture 里 entitlement 与它的 subscription 的 isActive / willRenew 相等。 */
+    private fun parseSubscription(json: String): org.revdog.purchases.customerinfo.SubscriptionInfo {
+        val info = parse(json, now = Date(NOW_2026_MS))
+        val subscription = requireNotNull(info.subscriptions["sub_a"])
+        val entitlement = requireNotNull(info.entitlements["pro"])
+        assertThat(subscription.isActive).isEqualTo(entitlement.isActive)
+        assertThat(subscription.willRenew).isEqualTo(entitlement.willRenew)
+        return subscription
+    }
+
+    @Test
+    fun `订阅有效且续订中`() {
+        val sub = parseSubscription(subscriptionResponse(expires = "2026-10-18T00:00:00Z"))
+        assertThat(sub.isActive).isTrue()
+        assertThat(sub.willRenew).isTrue()
+    }
+
+    @Test
+    fun `订阅已过期`() {
+        val sub = parseSubscription(subscriptionResponse(expires = "2026-09-01T00:00:00Z"))
+        assertThat(sub.isActive).isFalse()
+        // willRenew 只看五项否定，不看是否过期（RC 同口径）。
+        assertThat(sub.willRenew).isTrue()
+    }
+
+    @Test
+    fun `过期但在计费宽限期内仍然有效`() {
+        val sub = parseSubscription(
+            subscriptionResponse(expires = "2026-09-17T00:00:00Z", grace = "2026-09-20T00:00:00Z"),
+        )
+        assertThat(sub.isActive).isTrue()
+    }
+
+    @Test
+    fun `宽限期也已结束则无效`() {
+        val sub = parseSubscription(
+            subscriptionResponse(expires = "2026-09-10T00:00:00Z", grace = "2026-09-17T00:00:00Z"),
+        )
+        assertThat(sub.isActive).isFalse()
+    }
+
+    @Test
+    fun `expires 为 null 按终身算有效且不续订`() {
+        val sub = parseSubscription(subscriptionResponse(expires = null))
+        assertThat(sub.isActive).isTrue()
+        assertThat(sub.willRenew).isFalse()
+    }
+
+    @Test
+    fun `已取消续订的订阅到期前仍有效但不续订`() {
+        val sub = parseSubscription(
+            subscriptionResponse(expires = "2026-10-18T00:00:00Z", unsubscribe = "2026-09-10T00:00:00Z"),
+        )
+        assertThat(sub.isActive).isTrue()
+        assertThat(sub.willRenew).isFalse()
+    }
+
+    @Test
+    fun `display_name 有则解析、无则为 null`() {
+        val named = parseSubscription(subscriptionResponse(expires = "2026-10-18T00:00:00Z", displayName = "Pro 月度"))
+        assertThat(named.displayName).isEqualTo("Pro 月度")
+
+        val unnamed = parseSubscription(subscriptionResponse(expires = "2026-10-18T00:00:00Z"))
+        assertThat(unnamed.displayName).isNull()
+    }
+
+    @Test
+    fun `契约完整示例里 entitlement 与关联 subscription 的 isActive willRenew 一致`() {
+        val beforeExpiry = Date(Iso8601Utils.parseOrNull("2019-08-13T00:00:00Z")!!.time)
+        val info = parse(Fixtures.SUBSCRIBER_RESPONSE, now = beforeExpiry)
+        val premium = requireNotNull(info.entitlements["premium"])
+        val annual = requireNotNull(info.subscriptions["annual"])
+
+        assertThat(annual.isActive).isEqualTo(premium.isActive).isTrue()
+        assertThat(annual.willRenew).isEqualTo(premium.willRenew).isFalse()
+        assertThat(annual.displayName).isNull()
+    }
+
+    // endregion
+
     private companion object {
         /** 2019-07-26T17:40:10Z。 */
         const val REQUEST_DATE_MS = 1564162810000L

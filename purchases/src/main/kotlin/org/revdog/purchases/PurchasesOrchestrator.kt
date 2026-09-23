@@ -7,11 +7,16 @@ import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import com.android.billingclient.api.BillingClient
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.launch
 import org.revdog.purchases.attributes.SubscriberAttributesManager
 import org.revdog.purchases.caching.PendingPurchaseStore
 import org.revdog.purchases.common.AppConfig
@@ -27,6 +32,8 @@ import org.revdog.purchases.diagnostics.DiagnosticsErrorFields
 import org.revdog.purchases.diagnostics.DiagnosticsRecorder
 import org.revdog.purchases.diagnostics.DiagnosticsTracker
 import org.revdog.purchases.diagnostics.DiagnosticsWarningCode
+import org.revdog.purchases.diagnostics.recordExternalEvent
+import org.revdog.purchases.diagnostics.recordExternalWarning
 import org.revdog.purchases.google.BillingWrapper
 import org.revdog.purchases.google.ReplaceProductInfo
 import org.revdog.purchases.identity.AccountToken
@@ -43,6 +50,7 @@ import org.revdog.purchases.posting.PostPendingTransactionsHelper
 import org.revdog.purchases.posting.PostReceiptHelper
 import org.revdog.purchases.posting.PostTransactionsHelper
 import org.revdog.purchases.posting.ReceiptInfo
+import java.io.Closeable
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -90,6 +98,16 @@ internal class PurchasesOrchestrator(
 
     /** `distinctUntilChanged`：与 listener 那条通道同口径的去重（相同状态不重复发）。 */
     val customerInfoFlow: Flow<CustomerInfo> = customerInfoMutableFlow.asSharedFlow().distinctUntilChanged()
+
+    /**
+     * [addCustomerInfoObserver] 的订阅都挂在这个 scope 上，[close] 时一把取消。
+     *
+     * `Dispatchers.Unconfined`：收集不换线程 —— 回放值在订阅调用方的线程上同步取到，
+     * 之后的值在 `tryEmit` 的线程（`CustomerInfoUpdateHandler` 已经切到主线程）上取到；
+     * 真正调宿主回调之前一律再过一道 [mainDispatcher]（与 `updatedCustomerInfoListener` 同一出口）。
+     * 不用 `Dispatchers.Main`：它在 Flutter / RN 宿主里同样可能拿不到主 Looper（坑 38）。
+     */
+    private val observerScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
 
     /** 进程内第一次回前台（RC `state.firstTimeInForeground`）：那一次无条件刷新 CustomerInfo。 */
     private val firstTimeInForeground = AtomicBoolean(true)
@@ -369,6 +387,29 @@ internal class PurchasesOrchestrator(
         }
 
     val cachedCustomerInfo: CustomerInfo? get() = customerInfoManager.cachedCustomerInfo(appUserID)
+
+    /**
+     * 多订阅入口（`Purchases.addCustomerInfoObserver` 的实现，混合框架专用）。
+     *
+     * 挂 [customerInfoFlow]（replay = 1 + `distinctUntilChanged`）：订阅那一刻已有最近值就立刻回放一次，
+     * 之后每次变化回调一次；每个 observer 各自一条收集，互不影响。回调一律经 [mainDispatcher] 上主线程。
+     *
+     * 返回的 [Closeable]：`close()` 幂等，之后不再回调 —— **包括** close 之前已经 post 到主线程、
+     * 还没跑的那一次（每次回调前再看一眼 `closed`）。实例 [close] 时全部 observer 一并失效。
+     */
+    fun addCustomerInfoObserver(observer: UpdatedCustomerInfoListener): Closeable {
+        val observerClosed = AtomicBoolean(false)
+        val job = observerScope.launch {
+            customerInfoFlow.collect { customerInfo ->
+                mainDispatcher.dispatch {
+                    if (!observerClosed.get() && !closed.get()) observer.onReceived(customerInfo)
+                }
+            }
+        }
+        return Closeable {
+            if (observerClosed.compareAndSet(false, true)) job.cancel()
+        }
+    }
 
     fun getCustomerInfo(fetchPolicy: CacheFetchPolicy, callback: ReceiveCustomerInfoCallback) {
         val startedAtMs = dateProvider.now().time
@@ -962,6 +1003,16 @@ internal class PurchasesOrchestrator(
 
     val diagnosticsEnabled: Boolean get() = appConfig.diagnosticsEnabled
 
+    /** 混合框架插件记诊断（`Purchases.recordDiagnosticsEvent`）。校验与丢弃规则见 [recordExternalEvent]。 */
+    fun recordDiagnosticsEvent(name: String, properties: Map<String, Any?>) {
+        diagnostics.recordExternalEvent(name, properties)
+    }
+
+    /** 混合框架插件记 `sdk_warning{code, detail}`（`Purchases.recordDiagnosticsWarning`）。 */
+    fun recordDiagnosticsWarning(code: String, detail: String?) {
+        diagnostics.recordExternalWarning(code, detail)
+    }
+
     // endregion
 
     /** 前后台状态。进程生命周期观察者会自动维护；测试与宿主也可显式设。 */
@@ -1010,6 +1061,8 @@ internal class PurchasesOrchestrator(
         backend.close()
         updateHandler.updatedCustomerInfoListener = null
         updateHandler.internalObserver = null
+        // `addCustomerInfoObserver` 的全部订阅一并取消；已经 post 出去的那一次由 `closed` 挡住。
+        observerScope.cancel()
     }
 
     internal companion object {

@@ -148,6 +148,9 @@ tasks.withType<Test>().configureEach {
 
 dependencies {
     // `api` 而不是 `implementation`：宿主要能直接引用 BillingClient 类型（对照 RC `api(libs.billing)`）。
+    // 坐标是**纯 `billing`**（0.2.0 起，ADR 0099 决定 2；RC 10.22.1 同样是纯 billing）：0.1.x 用的
+    // `billing-ktx` 带 Kotlin metadata 2.3.0，经这条 `api` 传给宿主编译器，宿主 Kotlin 下限因此被抬到 2.2；
+    // SDK 源码全部是回调形态，从没用过 ktx 的挂起扩展。换掉之后下限由 coroutines 1.11（metadata 2.2）决定 → Kotlin 2.1。
     api(libs.billing)
 
     implementation(libs.androidx.annotation)

@@ -44,6 +44,15 @@ internal object DateHelper {
  */
 internal object EntitlementInfoHelper {
 
+    /**
+     * `isActive` 的口径（`EntitlementInfo` 与 `SubscriptionInfo` 共用这一处，0.2.0 抽出）。
+     *
+     * 宽限期（后端下发的 grace_period_expires_date）本身就是「还有效」的信号，
+     * 与本地时钟 grace 是两件事：前者是计费宽限，后者是抗改表。与 iOS `isActive` 同口径。
+     */
+    fun isActive(dateActive: DateActive, gracePeriodExpiresDate: Date?, requestDate: Date): Boolean =
+        dateActive.isActive || (gracePeriodExpiresDate != null && gracePeriodExpiresDate.after(requestDate))
+
     fun getWillRenew(
         store: Store,
         expirationDate: Date?,

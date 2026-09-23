@@ -98,6 +98,20 @@ public class Purchases private constructor(
     public val customerInfoFlow: Flow<CustomerInfo>
         get() = orchestrator.customerInfoFlow
 
+    /**
+     * **混合框架专用**（Flutter 插件，主代理裁定 1）：可多订阅的 CustomerInfo 变更通知，Java 可直接用。
+     *
+     * 与 [updatedCustomerInfoListener] 的区别：那是**单个**可替换的槽位（多个 Flutter 引擎各设一次会互相覆盖，
+     * RC 的单 listener 在多引擎下就是这么坏的）；这里每调一次多一个独立订阅。
+     * 事件源是 [customerInfoFlow]：订阅那一刻已有最近值就立刻回放一次，之后每次变化回调一次，
+     * 同一份 CustomerInfo 不重复回调。回调在主线程（与 [updatedCustomerInfoListener] 同一分发出口）。
+     *
+     * @return 调 `close()` 取消订阅（幂等，之后不再回调）。实例被重新 configure 替换时全部自动失效。
+     */
+    @InternalRevenueDogAPI
+    public fun addCustomerInfoObserver(observer: UpdatedCustomerInfoListener): java.io.Closeable =
+        orchestrator.addCustomerInfoObserver(observer)
+
     /** 同步读缓存，离线可用。没有缓存时为 `null`。 */
     public val cachedCustomerInfo: CustomerInfo?
         get() = orchestrator.cachedCustomerInfo
@@ -301,6 +315,26 @@ public class Purchases private constructor(
      */
     public val diagnosticsEnabled: Boolean
         get() = orchestrator.diagnosticsEnabled
+
+    /**
+     * **混合框架专用**（主代理裁定 10，对照 iOS 的 `@_spi` 记诊断入口）：插件记一条诊断事件。
+     *
+     * [name] 必须匹配 `^[a-z_]{1,64}$`（`docs/plan/sdk-diagnostics.md` 硬限），不匹配则打 warn 日志并丢弃，
+     * **不抛**。[properties] 原样进既有管线（字段截断、level 推导都在管线里）。诊断关闭时什么都不做。
+     */
+    @InternalRevenueDogAPI
+    public fun recordDiagnosticsEvent(name: String, properties: Map<String, Any?>) {
+        orchestrator.recordDiagnosticsEvent(name, properties)
+    }
+
+    /**
+     * **混合框架专用**：插件记一条 `sdk_warning{code, detail}`（例如 `hybrid_option_ignored`）。
+     * 诊断关闭时什么都不做。
+     */
+    @InternalRevenueDogAPI
+    public fun recordDiagnosticsWarning(code: String, detail: String?) {
+        orchestrator.recordDiagnosticsWarning(code, detail)
+    }
 
     /** 前后台状态。SDK 已自动跟随进程生命周期，这里留给宿主 / 测试显式覆盖。 */
     public fun setAppBackgrounded(backgrounded: Boolean) {

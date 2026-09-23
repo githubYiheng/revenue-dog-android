@@ -14,7 +14,7 @@ import org.revdog.purchases.Store
  */
 internal object Config {
     /** SDK 版本，`X-Version` 头的值。必须 == `gradle.properties` 的 `VERSION_NAME`。 */
-    const val FRAMEWORK_VERSION: String = "0.1.4"
+    const val FRAMEWORK_VERSION: String = "0.2.0"
 
     /** `X-Billing-Client-Sdk-Version` 头的值。必须 == 版本目录的 `billingClient`。 */
     const val BILLING_CLIENT_VERSION: String = "9.1.0"
